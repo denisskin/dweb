@@ -20,15 +20,6 @@ func init() {
 	h1.Sign(prv)
 }
 
-//func TestHeader_MarshalJSON(t *testing.T) {
-//	assert.JSONEq(t, `{"Ver":"1.0",
-//	"Title":"Test header",
-//	"Hello-Phrase":"Hello, 世界",
-//	"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",
-//	"Signature":"��\x03�\"�#z�\nI^�\x0e��S�\a�.�KΒ+�Wq:\x1e�\x05\x17�7k��b�]g�\x11s\\����'�\x06<-�^@\x119\t\v\b"
-//	}`, h1.JSON())
-//}
-
 func TestHeader_String(t *testing.T) {
 	assert.Equal(t, ""+
 		"Ver: 1.0\n"+

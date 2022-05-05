@@ -260,25 +260,6 @@ func (h Header) IsFile() bool {
 	return !h.IsDir()
 }
 
-/*
-
-Path: /dir/file
-Ver: 45
-Content-Size: 193858
-Content-Merkle: base64,qwertyuiofghjklsdgjdkyguygguyguggusfjff
-
-Path: /dir/file
-Ver: 45
-Volume: 193858
-Merkle: base64,qwertyuiofghjklsdgjdkyguygguyguggusfjff
-
-Path: /
-Ver: 45
-Tree-Volume: 193858
-Tree-Merkle: base64,qwertyuiofghjklsdgjdkyguygguyguggusfjff
-
-*/
-
 func (h Header) Deleted() bool {
 	return h.Has(HeaderDeleted)
 }
