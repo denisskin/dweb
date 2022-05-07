@@ -7,7 +7,8 @@ import (
 )
 
 var (
-	prv = NewPrivateKeyBySeed("private-key-seed")
+	testPrv = NewPrivateKeyBySeed("private-key-seed")
+	testPub = testPrv.Public().(PublicKey)
 
 	h1 = Header{
 		{"Ver", []byte("1.0")},
@@ -17,7 +18,7 @@ var (
 )
 
 func init() {
-	h1.Sign(prv)
+	h1.Sign(testPrv)
 }
 
 func TestHeader_String(t *testing.T) {

@@ -3,6 +3,7 @@ package vfs
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime"
 	"sort"
 	"strconv"
@@ -10,10 +11,10 @@ import (
 	"time"
 )
 
-type Header []KeyValue
+type Header []HeaderField
 
-type KeyValue struct {
-	Key   string `json:"key"`   //
+type HeaderField struct {
+	Name  string `json:"name"`  // field-name = 1*<any CHAR, excluding CTLs, SPACE, and ":">
 	Value []byte `json:"value"` //
 }
 
@@ -32,10 +33,11 @@ func initRootHeader(pub PublicKey) (h Header) {
 	return
 }
 
-const headerKeyChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_."
+const headerKeyCharset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_."
 
 func isValidHeaderKey(key string) bool {
-	return containOnly(key, headerKeyChars)
+	// todo: optimize, use charset-table as array  (see net/textproto/reader.go isTokenTable)
+	return containsOnly(key, headerKeyCharset)
 }
 
 func encodeHeaderValue(v []byte) string {
@@ -54,30 +56,30 @@ func decodeHeaderKey(v string) (string, error) {
 	return v, err
 }
 
-func (v KeyValue) Hash() []byte {
+func (v HeaderField) Hash() []byte {
 	return merkleRoot(
-		hash256([]byte(v.Key)),
+		hash256([]byte(v.Name)),
 		hash256(v.Value),
 	)
 }
 
-func (v KeyValue) String() string {
-	return encodeHeaderValue([]byte(v.Key)) + ": " + encodeHeaderValue(v.Value)
+func (v HeaderField) String() string {
+	return encodeHeaderValue([]byte(v.Name)) + ": " + encodeHeaderValue(v.Value)
 }
 
-func (v KeyValue) JSON() string {
-	return "{" + toJSON(v.Key) + ":" + toJSON(v.Value) + "}"
+func (v HeaderField) JSON() string {
+	return "{" + toJSON(v.Name) + ":" + toJSON(v.Value) + "}"
 }
 
-func (v KeyValue) MarshalJSON() ([]byte, error) {
+func (v HeaderField) MarshalJSON() ([]byte, error) {
 	return []byte(v.JSON()), nil
 }
 
-func (v *KeyValue) UnmarshalJSON(data []byte) (err error) {
+func (v *HeaderField) UnmarshalJSON(data []byte) (err error) {
 	var vv map[string][]byte
 	if err = json.Unmarshal(data, &vv); err == nil && vv != nil {
 		for k, val := range vv {
-			v.Key, v.Value = k, val
+			v.Name, v.Value = k, val
 		}
 	}
 	return err
@@ -124,7 +126,7 @@ func (h Header) marshalJSON() ([]byte, error) {
 		if i > 0 {
 			buf.WriteByte(',')
 		}
-		buf.WriteString(toJSON(v.Key))
+		buf.WriteString(toJSON(v.Name))
 		buf.WriteByte(':')
 		buf.WriteString(jsonEncode(v.Value))
 	}
@@ -135,16 +137,12 @@ func (h Header) marshalJSON() ([]byte, error) {
 //-------------------------------------------
 func (h Header) indexOf(key string) int {
 	for i := len(h) - 1; i >= 0; i-- {
-		if h[i].Key == key {
+		if h[i].Name == key {
 			return i
 		}
 	}
 	return -1
 }
-
-//func (h Header) ContentMerkleRoot() []byte {
-//	return h.GetBytes(HeaderMerkle)
-//}
 
 func (h Header) Has(key string) bool {
 	return h.indexOf(key) >= 0
@@ -179,7 +177,7 @@ func (h *Header) SetBytes(key string, value []byte) {
 	if i := h.indexOf(key); i >= 0 {
 		(*h)[i].Value = value
 	} else {
-		*h = append(*h, KeyValue{key, value})
+		*h = append(*h, HeaderField{key, value})
 	}
 }
 
@@ -196,7 +194,7 @@ func (h *Header) Add(key, value string) {
 }
 
 func (h *Header) AddBytes(key string, value []byte) {
-	*h = append(*h, KeyValue{key, value})
+	*h = append(*h, HeaderField{key, value})
 }
 
 func (h *Header) AddInt(key string, value int64) {
@@ -216,26 +214,27 @@ func (h *Header) Exclude(key string) {
 }
 
 func (h Header) Hash() []byte {
-	n := len(h)
-	if n == 0 {
+	if n := len(h); n > 0 && h[n-1].Name == HeaderSignature { // exclude last header "Signature"
+		return h[:n-1].hash()
+	}
+	return h.hash()
+}
+
+// returns raw-hash
+func (h Header) hash() []byte {
+	if n := len(h); n == 0 {
 		return nil
-	}
-	//switch h[n-1].Key { // last header
-	//case HeaderSignature: // exclude Signature-Header
-	//	return h[:n-1].Hash()
-	//case HeaderMerkle:
-	//	return hash256(h[:n-1].Hash(), h[n-1].Hash())
-	//}
-	if n == 1 {
+	} else if n == 1 {
 		return h[0].Hash()
+	} else {
+		i := merkleMiddle(n)
+		return hash256(h[:i].hash(), h[i:].hash())
 	}
-	i := merkleMiddle(n)
-	return hash256(h[:i].Hash(), h[i:].Hash())
 }
 
 func (h Header) Length() (n int) {
 	for _, kv := range h {
-		n += len(kv.Key) + len(kv.Value)
+		n += len(kv.Name) + len(kv.Value)
 	}
 	return
 }
@@ -262,11 +261,6 @@ func (h Header) IsFile() bool {
 
 func (h Header) Deleted() bool {
 	return h.Has(HeaderDeleted)
-}
-
-// Protocol returns UFS-Protocol
-func (h Header) Protocol() string {
-	return h.Get("Protocol")
 }
 
 // Ver returns last file or dir-version. batch-version
@@ -297,6 +291,13 @@ func (h Header) Merkle() []byte {
 	return h.GetBytes("Merkle")
 }
 
+//--------- root-header crypto methods ----------
+
+// Protocol returns VFS-Protocol
+func (h Header) Protocol() string {
+	return h.Get("Protocol")
+}
+
 func (h Header) PublicKey() PublicKey {
 	return DecodePublicKey(h.Get(HeaderPublicKey))
 }
@@ -316,7 +317,7 @@ func (h *Header) Sign(prv PrivateKey) {
 func (h Header) Verify() bool {
 	n := len(h)
 	return n >= 2 &&
-		h[n-1].Key == HeaderSignature && // last key is "Signature"
+		h[n-1].Name == HeaderSignature && // last key is "Signature"
 		Verify(h.PublicKey(), h[:n-1].Hash(), h[n-1].Value)
 }
 
@@ -325,16 +326,16 @@ func (h Header) Verify() bool {
 func ParseHeader(s string) (h Header, err error) {
 	for _, s := range strings.Split(s, "\n") {
 		if s = strings.TrimSpace(s); s != "" {
-			var kv KeyValue
-			if i := strings.Index(s, ": "); i > 0 {
-				if kv.Key, err = decodeHeaderKey(s[:i]); err != nil {
+			var kv HeaderField
+			if i := strings.IndexByte(s, ':'); i >= 0 {
+				if kv.Name, err = decodeHeaderKey(s[:i]); err != nil {
 					return
 				}
-				if kv.Value, err = decodeHeaderValue(s[i+2:]); err != nil {
+				if kv.Value, err = decodeHeaderValue(strings.TrimLeft(s[i+2:], " \t")); err != nil {
 					return
 				}
 			} else {
-				if kv.Key, err = decodeHeaderKey(s[:i]); err != nil {
+				if kv.Name, err = decodeHeaderKey(s[:i]); err != nil {
 					return
 				}
 			}

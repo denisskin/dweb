@@ -80,7 +80,7 @@ func jsonEncode(v []byte) string {
 //	return
 //}
 
-func containOnly(s, chars string) bool {
+func containsOnly(s, chars string) bool {
 	for _, c := range s {
 		if strings.IndexRune(chars, c) == -1 {
 			return false
