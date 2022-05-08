@@ -3,7 +3,6 @@ package vfs
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"mime"
 	"sort"
 	"strconv"
@@ -14,30 +13,46 @@ import (
 type Header []HeaderField
 
 type HeaderField struct {
-	Name  string `json:"name"`  // field-name = 1*<any CHAR, excluding CTLs, SPACE, and ":">
+	Name  string `json:"name"`  //
 	Value []byte `json:"value"` //
 }
 
+const headerFieldNameCharset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_."
+
+const MaxHeaderLength = 10 * 1024 // 10 KiB
+
+// predefined header-field-names
 const (
-	HeaderVer       = "Ver"        // file-version
-	HeaderDeleted   = "Deleted"    //
-	HeaderPublicKey = "Public-Key" //
-	HeaderSignature = "Signature"  //
+	// root header fields
+	headerProtocol    = "Protocol"    // root-header
+	headerPublicKey   = "Public-Key"  //
+	headerStoreVolume = "Tree-Volume" //
+	headerStoreMerkle = "Tree-Merkle" //
+	headerSignature   = "Signature"   //
+
+	// general
+	headerVer     = "Ver"     // file-version
+	headerPath    = "Path"    // file-path
+	headerCreated = "Created" //
+	headerUpdated = "Updated" //
+	headerDeleted = "Deleted" //
+
+	// files
+	headerFileMerkle = "Merkle" //
+	headerFileSize   = "Size"   //
 )
 
 func initRootHeader(pub PublicKey) (h Header) {
-	h.Add("Protocol", DefaultProtocol)
-	h.Add("Path", "/")
-	h.AddInt("Ver", 0)
+	h.Add(headerProtocol, DefaultProtocol)
+	h.Add(headerPath, "/")
+	h.AddInt(headerVer, 0)
 	h.SetPublicKey(pub)
 	return
 }
 
-const headerKeyCharset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_."
-
 func isValidHeaderKey(key string) bool {
 	// todo: optimize, use charset-table as array  (see net/textproto/reader.go isTokenTable)
-	return containsOnly(key, headerKeyCharset)
+	return containsOnly(key, headerFieldNameCharset)
 }
 
 func encodeHeaderValue(v []byte) string {
@@ -214,7 +229,7 @@ func (h *Header) Exclude(key string) {
 }
 
 func (h Header) Hash() []byte {
-	if n := len(h); n > 0 && h[n-1].Name == HeaderSignature { // exclude last header "Signature"
+	if n := len(h); n > 0 && h[n-1].Name == headerSignature { // exclude last header "Signature"
 		return h[:n-1].hash()
 	}
 	return h.hash()
@@ -240,7 +255,7 @@ func (h Header) Length() (n int) {
 }
 
 func (h Header) totalVolume() int64 {
-	return int64(h.Length()) + h.Size()
+	return int64(h.Length()) + h.FileSize()
 }
 
 //--------------------------------------
@@ -248,7 +263,7 @@ func (h Header) totalVolume() int64 {
 //--------------------------------------
 
 func (h Header) Path() string {
-	return h.Get("Path")
+	return h.Get(headerPath)
 }
 
 func (h Header) IsDir() bool {
@@ -260,12 +275,12 @@ func (h Header) IsFile() bool {
 }
 
 func (h Header) Deleted() bool {
-	return h.Has(HeaderDeleted)
+	return h.Has(headerDeleted)
 }
 
 // Ver returns last file or dir-version. batch-version
 func (h Header) Ver() int64 {
-	return h.GetInt(HeaderVer)
+	return h.GetInt(headerVer)
 }
 
 func (h Header) PartSize() int64 {
@@ -276,48 +291,48 @@ func (h Header) PartSize() int64 {
 }
 
 func (h Header) Updated() time.Time {
-	return h.GetTime("Updated")
+	return h.GetTime(headerUpdated)
 }
 
 func (h Header) Created() time.Time {
-	return h.GetTime("Created")
+	return h.GetTime(headerCreated)
 }
 
-func (h Header) Size() int64 {
-	return h.GetInt("Size")
+func (h Header) FileSize() int64 {
+	return h.GetInt(headerFileSize)
 }
 
-func (h Header) Merkle() []byte {
-	return h.GetBytes("Merkle")
+func (h Header) FileMerkle() []byte {
+	return h.GetBytes(headerFileMerkle)
 }
 
 //--------- root-header crypto methods ----------
 
 // Protocol returns VFS-Protocol
 func (h Header) Protocol() string {
-	return h.Get("Protocol")
+	return h.Get(headerProtocol)
 }
 
 func (h Header) PublicKey() PublicKey {
-	return DecodePublicKey(h.Get(HeaderPublicKey))
+	return DecodePublicKey(h.Get(headerPublicKey))
 }
 
 func (h *Header) SetPublicKey(pub PublicKey) {
 	//h.Exclude(HeaderPublicKey)
-	h.Set(HeaderPublicKey, EncodePublicKey(pub))
+	h.Set(headerPublicKey, EncodePublicKey(pub))
 }
 
 func (h *Header) Sign(prv PrivateKey) {
 	h.SetPublicKey(prv.Public().(PublicKey))
 
-	h.Exclude(HeaderSignature)
-	h.AddBytes(HeaderSignature, Sign(prv, h.Hash()))
+	h.Exclude(headerSignature)
+	h.AddBytes(headerSignature, Sign(prv, h.Hash()))
 }
 
 func (h Header) Verify() bool {
 	n := len(h)
 	return n >= 2 &&
-		h[n-1].Name == HeaderSignature && // last key is "Signature"
+		h[n-1].Name == headerSignature && // last key is "Signature"
 		Verify(h.PublicKey(), h[:n-1].Hash(), h[n-1].Value)
 }
 
