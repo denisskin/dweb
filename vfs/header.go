@@ -24,22 +24,23 @@ const MaxHeaderLength = 10 * 1024 // 10 KiB
 // predefined header-field-names
 const (
 	// root header fields
-	headerProtocol    = "Protocol"    // root-header
-	headerPublicKey   = "Public-Key"  //
-	headerStoreVolume = "Tree-Volume" //
-	headerStoreMerkle = "Tree-Merkle" //
-	headerSignature   = "Signature"   //
+	headerProtocol   = "Protocol"    //
+	headerPublicKey  = "Public-Key"  //
+	headerSignature  = "Signature"   //
+	headerTreeVolume = "Tree-Volume" //
+	headerTreeMerkle = "Tree-Merkle" //
 
 	// general
-	headerVer     = "Ver"     // file-version
-	headerPath    = "Path"    // file-path
+	headerVer     = "Ver"     // file or dir-version
+	headerPath    = "Path"    // file or dir-path
 	headerCreated = "Created" //
 	headerUpdated = "Updated" //
 	headerDeleted = "Deleted" //
 
 	// files
-	headerFileMerkle = "Merkle" //
-	headerFileSize   = "Size"   //
+	headerFileSize   = "Size"      // file size
+	headerFileMerkle = "Merkle"    // file merkle-root := MerkleRoot(fileParts...)
+	headerPartSize   = "Part-Size" // file part size
 )
 
 func initRootHeader(pub PublicKey) (h Header) {
@@ -284,7 +285,7 @@ func (h Header) Ver() int64 {
 }
 
 func (h Header) PartSize() int64 {
-	if i := h.GetInt("Part-Size"); i != 0 {
+	if i := h.GetInt(headerPartSize); i != 0 {
 		return i
 	}
 	return DefaultPartSize
@@ -319,21 +320,21 @@ func (h Header) PublicKey() PublicKey {
 
 func (h *Header) SetPublicKey(pub PublicKey) {
 	//h.Exclude(HeaderPublicKey)
-	h.Set(headerPublicKey, EncodePublicKey(pub))
+	h.Set(headerPublicKey, pub.Encode())
 }
 
 func (h *Header) Sign(prv PrivateKey) {
-	h.SetPublicKey(prv.Public().(PublicKey))
+	h.SetPublicKey(prv.PublicKey())
 
 	h.Exclude(headerSignature)
-	h.AddBytes(headerSignature, Sign(prv, h.Hash()))
+	h.AddBytes(headerSignature, prv.Sign(h.Hash()))
 }
 
 func (h Header) Verify() bool {
 	n := len(h)
 	return n >= 2 &&
 		h[n-1].Name == headerSignature && // last key is "Signature"
-		Verify(h.PublicKey(), h[:n-1].Hash(), h[n-1].Value)
+		h.PublicKey().Verify(h[:n-1].Hash(), h[n-1].Value)
 }
 
 //--------------------------------------------------------

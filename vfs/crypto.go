@@ -11,8 +11,8 @@ import (
 )
 
 type (
-	PrivateKey = ed25519.PrivateKey
-	PublicKey  = ed25519.PublicKey
+	PrivateKey []byte
+	PublicKey  []byte
 )
 
 const (
@@ -29,7 +29,7 @@ const (
 )
 
 func NewPrivateKeyBySeed(seed string) PrivateKey {
-	return ed25519.NewKeyFromSeed(hash256([]byte(seed)))
+	return PrivateKey(ed25519.NewKeyFromSeed(hash256([]byte(seed))))
 }
 
 func hash256(vv ...[]byte) []byte {
@@ -92,7 +92,11 @@ func merkleMiddle(n int) (i int) {
 	return
 }
 
-func EncodePublicKey(pub PublicKey) string {
+func (pub PublicKey) String() string {
+	return pub.Encode()
+}
+
+func (pub PublicKey) Encode() string {
 	return publicKeyPrefix + base64.StdEncoding.EncodeToString(pub)
 }
 
@@ -104,15 +108,19 @@ func DecodePublicKey(s string) PublicKey {
 	return nil
 }
 
-func Verify(pub PublicKey, hash, signature []byte) bool {
+func (prv PrivateKey) PublicKey() PublicKey {
+	return PublicKey(ed25519.PrivateKey(prv).Public().(ed25519.PublicKey))
+}
+
+func (pub PublicKey) Verify(hash, signature []byte) bool {
 	return len(pub) == PublicKeySize &&
 		len(hash) == HashSize &&
 		len(signature) == SignatureSize &&
-		ed25519.Verify(pub, hash, signature)
+		ed25519.Verify([]byte(pub), hash, signature)
 }
 
-func Sign(prv PrivateKey, hash []byte) []byte {
-	return ed25519.Sign(prv, hash)
+func (prv PrivateKey) Sign(hash []byte) []byte {
+	return ed25519.Sign([]byte(prv), hash)
 }
 
 func VerifyMerkleProof(hash, root, proof []byte) bool {
