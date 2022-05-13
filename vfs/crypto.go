@@ -108,6 +108,18 @@ func DecodePublicKey(s string) PublicKey {
 	return nil
 }
 
+func (prv PrivateKey) String() string {
+	return prv.Encode()
+}
+
+func (prv PrivateKey) Encode() string {
+	return "PRIVATE:Ed25519," + base64.StdEncoding.EncodeToString(prv)
+}
+
+func (prv PrivateKey) SubKey(name string) PrivateKey {
+	return hash256(hash256(prv), hash256([]byte(name)))
+}
+
 func (prv PrivateKey) PublicKey() PublicKey {
 	return PublicKey(ed25519.PrivateKey(prv).Public().(ed25519.PublicKey))
 }

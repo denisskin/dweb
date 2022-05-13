@@ -8,7 +8,7 @@ import (
 
 var (
 	testPrv = NewPrivateKeyBySeed("private-key-seed")
-	testPub = testPrv.Public().(PublicKey)
+	testPub = testPrv.PublicKey()
 
 	h1 = Header{
 		{"Ver", []byte("1.0")},
