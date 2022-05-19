@@ -62,9 +62,9 @@ func MerkleProofAppend(proof []byte, op byte, hash []byte) []byte {
 }
 
 func merkleMiddle(n int) (i int) {
-	for i = 1; (i << 1) < n; i <<= 1 {
+	for i = 1; i < n; i <<= 1 {
 	}
-	return
+	return i >> 1
 }
 
 func VerifyMerkleProof(hash, root, proof []byte) bool {
