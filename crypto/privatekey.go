@@ -9,7 +9,6 @@ type PrivateKey []byte
 
 const (
 	HashSize      = 32
-	PublicKeySize = ed25519.PublicKeySize
 	SignatureSize = ed25519.SignatureSize
 )
 
