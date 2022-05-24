@@ -2,12 +2,13 @@ package vfs
 
 import (
 	"encoding/hex"
+	"github.com/denisskin/dweb/crypto"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
 var (
-	testPrv = NewPrivateKeyBySeed("private-key-seed")
+	testPrv = crypto.NewPrivateKeyBySeed("private-key-seed")
 	testPub = testPrv.PublicKey()
 
 	h1 = Header{

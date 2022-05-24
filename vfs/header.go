@@ -3,6 +3,7 @@ package vfs
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/denisskin/dweb/crypto"
 	"mime"
 	"sort"
 	"strconv"
@@ -27,8 +28,8 @@ const (
 	headerProtocol   = "Protocol"    //
 	headerPublicKey  = "Public-Key"  //
 	headerSignature  = "Signature"   //
-	headerTreeVolume = "Tree-Volume" //
-	headerTreeMerkle = "Tree-Merkle" //
+	headerTreeVolume = "Tree-Volume" // volume of full file tree
+	headerTreeMerkle = "Tree-Merkle" // root merkle of full file tree
 
 	// general
 	headerVer     = "Ver"     // file or dir-version
@@ -38,15 +39,16 @@ const (
 	headerDeleted = "Deleted" //
 
 	// files
-	headerFileSize   = "Size"      // file size
-	headerFileMerkle = "Merkle"    // file merkle-root := MerkleRoot(fileParts...)
-	headerPartSize   = "Part-Size" // file part size
+	headerFileSize   = "Size"       // file size
+	headerFileMerkle = "Merkle"     // file merkle-root := MerkleRoot(fileParts...)
+	headerPieceSize  = "Piece-Size" // file piece size
 )
 
-func initRootHeader(pub PublicKey) (h Header) {
+func NewRootHeader(pub crypto.PublicKey) (h Header) {
 	h.Add(headerProtocol, DefaultProtocol)
 	h.Add(headerPath, "/")
 	h.AddInt(headerVer, 0)
+	h.AddInt(headerPieceSize, DefaultFilePieceSize)
 	h.SetPublicKey(pub)
 	return
 }
@@ -57,6 +59,7 @@ func isValidHeaderKey(key string) bool {
 }
 
 func encodeHeaderValue(v []byte) string {
+	// todo: use binary encoding (not string)
 	return mime.BEncoding.Encode("utf-8", string(v))
 }
 
@@ -73,9 +76,9 @@ func decodeHeaderKey(v string) (string, error) {
 }
 
 func (v HeaderField) Hash() []byte {
-	return merkleRoot(
-		hash256([]byte(v.Name)),
-		hash256(v.Value),
+	return crypto.MerkleRoot(
+		crypto.Hash256([]byte(v.Name)),
+		crypto.Hash256(v.Value),
 	)
 }
 
@@ -230,22 +233,13 @@ func (h *Header) Exclude(key string) {
 }
 
 func (h Header) Hash() []byte {
-	if n := len(h); n > 0 && h[n-1].Name == headerSignature { // exclude last header "Signature"
-		return h[:n-1].hash()
+	n := len(h)
+	if n > 0 && h[n-1].Name == headerSignature { // exclude last header "Signature"
+		n--
 	}
-	return h.hash()
-}
-
-// returns raw-hash
-func (h Header) hash() []byte {
-	if n := len(h); n == 0 {
-		return nil
-	} else if n == 1 {
-		return h[0].Hash()
-	} else {
-		i := merkleMiddle(n)
-		return hash256(h[:i].hash(), h[i:].hash())
-	}
+	return crypto.MakeMerkleRoot(n, func(i int) []byte {
+		return h[i].Hash()
+	})
 }
 
 func (h Header) Length() (n int) {
@@ -284,11 +278,11 @@ func (h Header) Ver() int64 {
 	return h.GetInt(headerVer)
 }
 
-func (h Header) PartSize() int64 {
-	if i := h.GetInt(headerPartSize); i != 0 {
+func (h Header) PieceSize() int64 {
+	if i := h.GetInt(headerPieceSize); i != 0 {
 		return i
 	}
-	return DefaultPartSize
+	return DefaultFilePieceSize
 }
 
 func (h Header) Updated() time.Time {
@@ -314,16 +308,16 @@ func (h Header) Protocol() string {
 	return h.Get(headerProtocol)
 }
 
-func (h Header) PublicKey() PublicKey {
-	return DecodePublicKey(h.Get(headerPublicKey))
+func (h Header) PublicKey() crypto.PublicKey {
+	return crypto.DecodePublicKey(h.Get(headerPublicKey))
 }
 
-func (h *Header) SetPublicKey(pub PublicKey) {
+func (h *Header) SetPublicKey(pub crypto.PublicKey) {
 	//h.Exclude(HeaderPublicKey)
 	h.Set(headerPublicKey, pub.Encode())
 }
 
-func (h *Header) Sign(prv PrivateKey) {
+func (h *Header) Sign(prv crypto.PrivateKey) {
 	h.SetPublicKey(prv.PublicKey())
 
 	h.Exclude(headerSignature)
