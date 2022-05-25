@@ -1,7 +1,6 @@
 package vfs
 
 import (
-	"bytes"
 	"errors"
 	"github.com/denisskin/dweb/crypto"
 	"io"
