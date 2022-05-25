@@ -1,37 +1,44 @@
 package vfs
 
 import (
+	"bytes"
 	"errors"
+	"github.com/denisskin/dweb/crypto"
+	"io"
 	"io/fs"
 	"strings"
 	"time"
 )
 
 type VFS interface {
-	PublicKey() PublicKey
+	PublicKey() crypto.PublicKey
 
 	FileHeader(path string) (Header, error)
 	FileMerkleProof(path string) (hash, proof []byte, err error)
 	FileParts(path string) (hashes [][]byte, err error)
-	FileContent(path string, offset int64, size int) ([]byte, error)
+	Open(path string) (File, error)
 
-	//OpenFile(path string) (io.Read, error)
-
-	ListDir(path string) ([]Header, error)
+	ReadDir(path string) ([]Header, error)
 
 	GetBatch(ver int64) (*Batch, error)
-	MakeBatch(prv PrivateKey, src fs.FS, ts time.Time) (*Batch, error)
+	MakeBatch(prv crypto.PrivateKey, src fs.FS, ts time.Time) (*Batch, error)
 	PutBatch(*Batch) error
 }
 
-const (
-	DefaultProtocol = "0.1"
-	DefaultPartSize = 16 << 20
+type File interface {
+	io.Reader
+	io.Seeker
+	io.Closer
+}
 
-	PathMaxLength        = 255
-	PathNameMaxLength    = 50
-	PathMaxLevels        = 6
-	PathMaxDirFilesCount = 1024
+const (
+	DefaultProtocol      = "0.1"
+	DefaultFilePieceSize = 1 << 20 // (1 MiB) – default file piece size
+
+	MaxPathLength        = 255
+	MaxPathNameLength    = 50
+	MaxPathLevels        = 6
+	MaxPathDirFilesCount = 1024
 
 	pathNameChars = ".-_~@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
@@ -46,13 +53,13 @@ func IsValidPath(path string) bool {
 		return true
 	}
 	n := len(path)
-	if n == 0 || path[0] != '/' || n > PathMaxLength {
+	if n == 0 || path[0] != '/' || n > MaxPathLength {
 		return false
 	}
 	path = path[1:] // trim prefix '/'
 	path = strings.TrimSuffix(path, "/")
 	for i, name := range strings.Split(path, "/") { // todo: optimize
-		if i >= PathMaxLevels || !isValidPathName(name) {
+		if i >= MaxPathLevels || !isValidPathName(name) {
 			return false
 		}
 	}
@@ -62,8 +69,23 @@ func IsValidPath(path string) bool {
 func isValidPathName(name string) bool {
 	return name != "" && // len>0
 		name[0] != '.' && // not started from dot
-		len(name) <= PathNameMaxLength && //
+		len(name) <= MaxPathNameLength && //
 		containsOnly(name, pathNameChars) //
+}
+
+func pathLess(a, b string) bool {
+	// TODO: optimize
+	A := strings.Split(a, "/")
+	B := strings.Split(b, "/")
+	nB := len(B)
+	for i, Ai := range A {
+		if nB < i+1 {
+			return false
+		} else if Ai != B[i] {
+			return Ai < B[i]
+		}
+	}
+	return true
 }
 
 func dirname(path string) string {
