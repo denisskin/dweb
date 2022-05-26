@@ -25,11 +25,11 @@ const MaxHeaderLength = 10 * 1024 // 10 KiB
 // predefined header-field-names
 const (
 	// root header fields
-	headerProtocol   = "Protocol"    //
-	headerPublicKey  = "Public-Key"  //
-	headerSignature  = "Signature"   //
-	headerTreeVolume = "Tree-Volume" // volume of full file tree
-	headerTreeMerkle = "Tree-Merkle" // root merkle of full file tree
+	headerProtocol       = "Protocol"         //
+	headerPublicKey      = "Public-Key"       //
+	headerSignature      = "Signature"        //
+	headerTreeVolume     = "Tree-Volume"      // volume of full file tree
+	headerTreeMerkleRoot = "Tree-Merkle-Root" // root merkle of full file tree
 
 	// general
 	headerVer     = "Ver"     // file or dir-version
@@ -279,10 +279,7 @@ func (h Header) Ver() int64 {
 }
 
 func (h Header) PieceSize() int64 {
-	if i := h.GetInt(headerPieceSize); i != 0 {
-		return i
-	}
-	return DefaultFilePieceSize
+	return h.GetInt(headerPieceSize)
 }
 
 func (h Header) Updated() time.Time {
@@ -299,6 +296,10 @@ func (h Header) FileSize() int64 {
 
 func (h Header) FileMerkle() []byte {
 	return h.GetBytes(headerFileMerkle)
+}
+
+func (h Header) TreeMerkleRoot() []byte {
+	return h.GetBytes(headerTreeMerkleRoot)
 }
 
 //--------- root-header crypto methods ----------

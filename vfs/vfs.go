@@ -14,7 +14,7 @@ type VFS interface {
 
 	FileHeader(path string) (Header, error)
 	FileMerkleProof(path string) (hash, proof []byte, err error)
-	FileParts(path string) (hashes [][]byte, err error)
+	FilePieces(path string) (hashes [][]byte, err error)
 	Open(path string) (File, error)
 
 	ReadDir(path string) ([]Header, error)
