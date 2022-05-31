@@ -39,16 +39,16 @@ const (
 	headerDeleted = "Deleted" //
 
 	// files
-	headerFileSize   = "Size"       // file size
-	headerFileMerkle = "Merkle"     // file merkle-root := MerkleRoot(fileParts...)
-	headerPieceSize  = "Piece-Size" // file piece size
+	headerFileSize   = "Size"      // file size
+	headerFileMerkle = "Merkle"    // file merkle-root := MerkleRoot(fileParts...)
+	headerPartSize   = "Part-Size" // file part size
 )
 
 func NewRootHeader(pub crypto.PublicKey) (h Header) {
 	h.Add(headerProtocol, DefaultProtocol)
 	h.Add(headerPath, "/")
 	h.AddInt(headerVer, 0)
-	h.AddInt(headerPieceSize, DefaultFilePieceSize)
+	h.AddInt(headerPartSize, DefaultFilePartSize)
 	h.SetPublicKey(pub)
 	return
 }
@@ -278,8 +278,8 @@ func (h Header) Ver() int64 {
 	return h.GetInt(headerVer)
 }
 
-func (h Header) PieceSize() int64 {
-	return h.GetInt(headerPieceSize)
+func (h Header) PartSize() int64 {
+	return h.GetInt(headerPartSize)
 }
 
 func (h Header) Updated() time.Time {

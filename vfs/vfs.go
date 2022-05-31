@@ -14,7 +14,7 @@ type VFS interface {
 
 	FileHeader(path string) (Header, error)
 	FileMerkleProof(path string) (hash, proof []byte, err error)
-	FilePieces(path string) (hashes [][]byte, err error)
+	FileParts(path string) (hashes [][]byte, err error)
 	Open(path string) (File, error)
 
 	ReadDir(path string) ([]Header, error)
@@ -31,8 +31,8 @@ type File interface {
 }
 
 const (
-	DefaultProtocol      = "0.1"
-	DefaultFilePieceSize = 1 << 20 // (1 MiB) – default file piece size
+	DefaultProtocol     = "0.1"
+	DefaultFilePartSize = 1 << 20 // (1 MiB) – default file part size
 
 	MaxPathLength        = 255
 	MaxPathNameLength    = 50

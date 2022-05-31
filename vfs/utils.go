@@ -35,13 +35,6 @@ func recoverErr(err *error) {
 	}
 }
 
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 //func hex8(h []byte) string {
 //	if len(h) > 4 {
 //		h = h[:4]

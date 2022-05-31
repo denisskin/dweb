@@ -29,8 +29,8 @@ func OpenVFS(pub crypto.PublicKey, db db.Storage) (_ VFS, err error) {
 	return s, s.initDB()
 }
 
-func (f *fileSystem) setPieceSize(size int64) {
-	f.nodes["/"].Header.SetInt(headerPieceSize, size)
+func (f *fileSystem) setPartSize(size int64) {
+	f.nodes["/"].Header.SetInt(headerPartSize, size)
 }
 
 func (f *fileSystem) PublicKey() crypto.PublicKey {
@@ -87,14 +87,14 @@ func (f *fileSystem) FileMerkleProof(path string) (hash, proof []byte, err error
 	return proof[:crypto.HashSize], proof[crypto.HashSize:], nil
 }
 
-func (f *fileSystem) rootPieceSize() int64 {
-	if size := f.root().PieceSize(); size > 0 {
+func (f *fileSystem) rootPartSize() int64 {
+	if size := f.root().PartSize(); size > 0 {
 		return size
 	}
-	return DefaultFilePieceSize
+	return DefaultFilePartSize
 }
 
-func (f *fileSystem) FilePieces(path string) (hashes [][]byte, err error) {
+func (f *fileSystem) FileParts(path string) (hashes [][]byte, err error) {
 	h := f.fileHeader(path)
 	if h == nil {
 		err = ErrNotFound
@@ -106,11 +106,11 @@ func (f *fileSystem) FilePieces(path string) (hashes [][]byte, err error) {
 	}
 	defer fl.Close()
 
-	pieceSize := h.PieceSize()
-	if pieceSize == 0 {
-		pieceSize = f.rootPieceSize()
+	partSize := h.PartSize()
+	if partSize == 0 {
+		partSize = f.rootPartSize()
 	}
-	_, hashes, err = crypto.ReadMerkleRoot(fl, h.FileSize(), pieceSize)
+	_, hashes, err = crypto.ReadMerkleRoot(fl, h.FileSize(), partSize)
 	return
 }
 
@@ -177,7 +177,7 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 	assertBool(b.Path() == "/", "invalid batch-header Path")
 	assertBool(b.Ver() > 0, "invalid batch-header Ver")
 	assertBool(b.Ver() > r.Ver(), "invalid batch-header Ver")
-	assertBool(b.PieceSize() == r.PieceSize(), "invalid batch-header Piece-Size")
+	assertBool(b.PartSize() == r.PartSize(), "invalid batch-header Part-Size")
 	assertBool(!b.Created().IsZero(), "invalid batch-header Created")
 	assertBool(!b.Updated().IsZero(), "invalid batch-header Updated")
 	assertBool(b.Created().Unix() == r.Created().Unix() || r.Created().IsZero(), "invalid batch-header Created")
@@ -235,9 +235,9 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 	assertBool(bytes.Equal(newMerkle, b.TreeMerkleRoot()), "invalid batch-header Tree-Merkle-Root")
 	assertBool(totalVolume == b.GetInt(headerTreeVolume), "invalid batch-header Tree-Volume")
 
-	rootPieceSize := b.PieceSize()
-	//if rootPieceSize == 0 {
-	//	rootPieceSize = DefaultFilePieceSize
+	rootPartSize := b.PartSize()
+	//if rootPartSize == 0 {
+	//	rootPartSize = DefaultFilePartSize
 	//}
 
 	//--- verify and put file content
@@ -247,25 +247,25 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 		for _, h := range batch.Headers {
 			if hSize, hMerkle := h.FileSize(), h.FileMerkle(); hSize > 0 || len(hMerkle) != 0 {
 
-				pieceSize := h.PieceSize()
-				if pieceSize == 0 {
-					pieceSize = rootPieceSize
+				partSize := h.PartSize()
+				if partSize == 0 {
+					partSize = rootPartSize
 				}
-				assertBool(pieceSize > 0, "empty batch-header Piece-Size")
+				assertBool(partSize > 0, "empty batch-header Part-Size")
 
 				cont := make([]byte, int(hSize))
 				n, err := io.ReadFull(batch.Body, cont)
 				assertNoErr(err)
 				assertBool(int64(n) == hSize, "invalid batch-content")
 
-				merkle, _, _ := crypto.ReadMerkleRoot(bytes.NewBuffer(cont), hSize, pieceSize)
+				merkle, _, _ := crypto.ReadMerkleRoot(bytes.NewBuffer(cont), hSize, partSize)
 				//assertBool(hSize == sz, "invalid batch-header Size")
 				assertBool(bytes.Equal(h.FileMerkle(), merkle), "invalid batch-header Merkle")
 
 				err = tx.Put(h.Path(), bytes.NewBuffer(cont))
 				assertNoErr(err)
 
-				// TODO: r := crypto.NewMerkleReader(batch.Body, hSize, h.PieceSize())
+				// TODO: r := crypto.NewMerkleReader(batch.Body, hSize, h.PartSize())
 				// tx.Put(key, r) // put reader
 				// assertBool(bytes.Equal(h.Merkle(), r.MerkleRoot()))
 				// assertBool(r.ReadSize() == size, "invalid batch-header Size")
@@ -293,8 +293,8 @@ func (f *fileSystem) MakeBatch(prv crypto.PrivateKey, dfs fs.FS, ts time.Time) (
 	defer recoverErr(&err)
 
 	h0 := f.nodes["/"].Header
-	ver := h0.Ver() + 1         // new ver
-	pieceSize := h0.PieceSize() //
+	ver := h0.Ver() + 1       // new ver
+	partSize := h0.PartSize() //
 
 	buf := bytes.NewBuffer(nil)
 	batch = &Batch{Body: buf}
@@ -320,7 +320,7 @@ func (f *fileSystem) MakeBatch(prv crypto.PrivateKey, dfs fs.FS, ts time.Time) (
 		var fileMerkle, fileCont []byte
 		var fileSize int64
 		if !isDir {
-			fileSize, fileMerkle, _, err = fsMerkleRoot(dfs, dfsPath, pieceSize)
+			fileSize, fileMerkle, _, err = fsMerkleRoot(dfs, dfsPath, partSize)
 			assertNoErr(err)
 		}
 		if path == "/" || !exists || !isDir && !bytes.Equal(h.GetBytes(headerFileMerkle), fileMerkle) { // not exists or changed
@@ -399,7 +399,7 @@ func (f *fileSystem) MakeBatch(prv crypto.PrivateKey, dfs fs.FS, ts time.Time) (
 	return batch, nil
 }
 
-func fsMerkleRoot(dfs fs.FS, path string, pieceSize int64) (size int64, merkle []byte, hashes [][]byte, err error) {
+func fsMerkleRoot(dfs fs.FS, path string, partSize int64) (size int64, merkle []byte, hashes [][]byte, err error) {
 	f, err := dfs.Open(path)
 	if err != nil {
 		return
@@ -410,6 +410,6 @@ func fsMerkleRoot(dfs fs.FS, path string, pieceSize int64) (size int64, merkle [
 		return
 	}
 	size = st.Size()
-	merkle, hashes, err = crypto.ReadMerkleRoot(f, size, pieceSize)
+	merkle, hashes, err = crypto.ReadMerkleRoot(f, size, partSize)
 	return
 }
