@@ -53,6 +53,21 @@ func NewRootHeader(pub crypto.PublicKey) (h Header) {
 	return
 }
 
+func ValidateHeader(h Header) error {
+	if h.Length() > MaxHeaderLength {
+		return errInvalidHeaderLength
+	}
+	for _, kv := range h {
+		if !isValidHeaderKey(kv.Name) {
+			return errInvalidHeaderName
+		}
+	}
+	if !IsValidPath(h.Path()) {
+		return errInvalidPath
+	}
+	return nil
+}
+
 func isValidHeaderKey(key string) bool {
 	// todo: optimize, use charset-table as array  (see net/textproto/reader.go isTokenTable)
 	return containsOnly(key, headerFieldNameCharset)

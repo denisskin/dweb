@@ -2,25 +2,17 @@ package vfs
 
 import (
 	"errors"
-	"github.com/denisskin/dweb/crypto"
 	"io"
-	"io/fs"
 	"strings"
-	"time"
 )
 
 type VFS interface {
-	PublicKey() crypto.PublicKey
-
 	FileHeader(path string) (Header, error)
 	FileMerkleProof(path string) (hash, proof []byte, err error)
 	FileParts(path string) (hashes [][]byte, err error)
 	Open(path string) (File, error)
-
 	ReadDir(path string) ([]Header, error)
-
 	GetBatch(ver int64) (*Batch, error)
-	MakeBatch(prv crypto.PrivateKey, src fs.FS, ts time.Time) (*Batch, error)
 	PutBatch(*Batch) error
 }
 
@@ -45,6 +37,10 @@ const (
 var (
 	ErrNotFound     = errors.New("not found")
 	ErrTooManyFiles = errors.New("too many files")
+
+	errInvalidHeaderLength = errors.New("invalid header length")
+	errInvalidHeaderName   = errors.New("invalid header field name")
+	errInvalidPath         = errors.New("invalid header Path")
 )
 
 func IsValidPath(path string) bool {
