@@ -65,10 +65,10 @@ func indexTree(hh []Header) (nodes map[string]*fsNode, err error) {
 //	}
 //}
 
-func (nd *fsNode) childHeaders() []Header {
+func (nd *fsNode) copyChildHeaders() []Header {
 	hh := make([]Header, len(nd.children))
 	for i, c := range nd.children {
-		hh[i] = c.Header
+		hh[i] = c.Header.Copy()
 	}
 	return hh
 }

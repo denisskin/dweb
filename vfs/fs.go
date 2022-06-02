@@ -5,11 +5,7 @@ import (
 	"github.com/denisskin/dweb/crypto"
 	"github.com/denisskin/dweb/db"
 	"io"
-	"io/fs"
-	"sort"
-	"strings"
 	"sync"
-	"time"
 )
 
 type fileSystem struct {
@@ -72,11 +68,11 @@ func (f *fileSystem) root() Header {
 	return f.nodes["/"].Header
 }
 
-func (f *fileSystem) FileHeader(path string) (h Header, err error) {
-	if h = f.fileHeader(path); h == nil {
-		err = ErrNotFound
+func (f *fileSystem) FileHeader(path string) (Header, error) {
+	if h := f.fileHeader(path); h != nil {
+		return h.Copy(), nil
 	}
-	return
+	return nil, ErrNotFound
 }
 
 func (f *fileSystem) FileMerkleProof(path string) (hash, proof []byte, err error) {
@@ -128,7 +124,7 @@ func (f *fileSystem) Open(path string) (File, error) {
 
 func (f *fileSystem) ReadDir(path string) ([]Header, error) {
 	if d := f.nodes[path]; d != nil && d.isDir() && !d.deleted() {
-		return d.childHeaders(), nil
+		return d.copyChildHeaders(), nil
 	}
 	return nil, ErrNotFound
 }
@@ -173,6 +169,7 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 	r := f.root()
 	b := batch.Root()
 
+	assertNoErr(ValidateHeader(b))
 	assertBool(b.Get(headerProtocol) == DefaultProtocol, "unsupported Protocol")
 	assertBool(b.Path() == "/", "invalid batch-header Path")
 	assertBool(b.Ver() > 0, "invalid batch-header Ver")
@@ -184,15 +181,15 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 	assertBool(b.Updated().Unix() >= b.Created().Unix(), "invalid batch-header Updated")
 	assertBool(b.Updated().Unix() > r.Updated().Unix(), "invalid batch-header Updated")
 	assertBool(!b.Deleted(), "invalid batch-header Deleted")
-	assertBool(bytes.Equal(b.PublicKey(), f.pub), "invalid batch-header PublicKey")
+	assertBool(b.PublicKey().Equal(f.pub), "invalid batch-header Public-Key")
 	assertBool(b.Verify(), "invalid batch-header Signature")
-	assertNoErr(validateRoot(b, f.pub))
 
 	//--- verify other headers ---
 	updated := make(map[string]Header, len(batch.Headers))
 	hh := make([]Header, 0, len(batch.Headers)+len(f.nodes))
 
 	for _, h := range batch.Headers {
+		assertNoErr(ValidateHeader(h))
 		path := h.Path()
 		hh = append(hh, h)
 		updated[path] = h
@@ -286,130 +283,5 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 
 	assertNoErr(err)
 	f.nodes = newNodes
-	return
-}
-
-func (f *fileSystem) MakeBatch(prv crypto.PrivateKey, dfs fs.FS, ts time.Time) (batch *Batch, err error) {
-	defer recoverErr(&err)
-
-	h0 := f.nodes["/"].Header
-	ver := h0.Ver() + 1       // new ver
-	partSize := h0.PartSize() //
-
-	buf := bytes.NewBuffer(nil)
-	batch = &Batch{Body: buf}
-
-	var hh []Header
-	var inBatch = map[string]bool{}
-	var onDisk = make(map[string]bool, len(f.nodes))
-
-	var walkOnDisk func(string)
-	walkOnDisk = func(path string) {
-		var err error
-		var dfsPath = path[1:] // trim prefix '/'
-		var isDir = strings.HasSuffix(path, "/")
-		var h Header
-		var exists bool
-		var nd = f.nodes[path]
-		if nd != nil { // file is exists
-			h, exists = nd.Header.Copy(), true
-		} else {
-			h = Header{{headerPath, []byte(path)}}
-		}
-		onDisk[path] = true
-		var fileMerkle, fileCont []byte
-		var fileSize int64
-		if !isDir {
-			fileSize, fileMerkle, _, err = fsMerkleRoot(dfs, dfsPath, partSize)
-			assertNoErr(err)
-		}
-		if path == "/" || !exists || !isDir && !bytes.Equal(h.GetBytes(headerFileMerkle), fileMerkle) { // not exists or changed
-			h.SetInt(headerVer, ver) // set new version
-			if !isDir {
-				h.SetInt(headerFileSize, fileSize)
-				h.SetBytes(headerFileMerkle, fileMerkle)
-				fileCont, err = fs.ReadFile(dfs, dfsPath)
-				assertNoErr(err)
-				_, err = buf.Write(fileCont)
-				assertNoErr(err)
-			}
-			batch.Headers = append(batch.Headers, h)
-			inBatch[path], hh = true, append(hh, h)
-		}
-		if isDir { //- read dir
-			if dfsPath == "" {
-				dfsPath = "."
-			}
-			dfsPath = strings.TrimSuffix(dfsPath, "/")
-			dd, err := fs.ReadDir(dfs, dfsPath)
-			assertNoErr(err)
-			if len(dd) > MaxPathDirFilesCount {
-				assertNoErr(ErrTooManyFiles)
-			}
-			sort.Slice(dd, func(i, j int) bool { // sort
-				return pathLess(dd[i].Name(), dd[j].Name())
-			})
-			for _, f := range dd {
-				if f.IsDir() {
-					walkOnDisk(path + f.Name() + "/")
-				} else {
-					walkOnDisk(path + f.Name())
-				}
-			}
-		}
-	}
-	walkOnDisk("/")
-
-	//-- add old headers to batch
-	fSort := false
-	f.nodes["/"].walk(func(nd *fsNode) bool {
-		if !onDisk[nd.path] { // delete node
-			fSort = true
-			var h = Header{{headerPath, []byte(nd.path)}}
-			h.SetInt(headerVer, ver)
-			h.SetInt(headerDeleted, 1)
-			hh = append(hh, h)
-			batch.Headers = append(batch.Headers, h)
-			return false // skip all child nodes
-		}
-		if !inBatch[nd.path] {
-			hh = append(hh, nd.Header)
-		}
-		return true
-	})
-	if fSort {
-		sortHeaders(batch.Headers)
-	}
-
-	//-- calc new batch merkle
-	sortHeaders(hh)
-	newTree, err := indexTree(hh)
-	assertNoErr(err)
-	ndRoot := newTree["/"]
-
-	//--- set merkle + sign
-	hRoot := &batch.Headers[0]
-	if !hRoot.Has(headerCreated) {
-		hRoot.SetTime(headerCreated, ts)
-	}
-	hRoot.SetTime(headerUpdated, ts)
-	hRoot.SetInt(headerTreeVolume, ndRoot.totalVolume())
-	hRoot.SetBytes(headerTreeMerkleRoot, ndRoot.childrenMerkleRoot())
-	hRoot.Sign(prv)
-	return batch, nil
-}
-
-func fsMerkleRoot(dfs fs.FS, path string, partSize int64) (size int64, merkle []byte, hashes [][]byte, err error) {
-	f, err := dfs.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return
-	}
-	size = st.Size()
-	merkle, hashes, err = crypto.ReadMerkleRoot(f, size, partSize)
 	return
 }
