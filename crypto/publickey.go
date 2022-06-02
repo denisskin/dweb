@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/hex"
@@ -19,6 +20,10 @@ func (pub PublicKey) String() string {
 
 func (pub PublicKey) Encode() string {
 	return publicKeyEncodingPrefix + base64.StdEncoding.EncodeToString(pub)
+}
+
+func (pub PublicKey) Equal(p PublicKey) bool {
+	return len(pub) == PublicKeySize && bytes.Equal(pub, p)
 }
 
 func (pub PublicKey) Verify(hash, signature []byte) bool {
