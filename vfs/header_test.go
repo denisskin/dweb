@@ -2,6 +2,7 @@ package vfs
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"github.com/denisskin/dweb/crypto"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -11,48 +12,99 @@ var (
 	testPrv = crypto.NewPrivateKeyBySeed("private-key-seed")
 	testPub = testPrv.PublicKey()
 
-	h1 = Header{
-		{"Ver", []byte("1.0")},
-		{"Title", []byte("Test header")},
-		{"Hello-Phrase", []byte("Hello, 世界")},
-	}
+	testHeaders = []Header{{
+		{"Ver", []byte("1")},
+		{"Title", []byte("Hello, 世界")},
+		{"Description", []byte("Test header")},
+		{"Path", []byte("/")},
+		{"Created", []byte("2022-01-01T01:02:03Z")},
+		{"Updated", []byte("2022-01-01T01:02:03Z")},
+		{"Part-Size", []byte("1024")},
+	}, {
+		{"Ver", []byte("1")},
+		{"Path", []byte("/dir/")},
+	}, {
+		{"Ver", []byte("2")},
+		{"Path", []byte("/dir/abc.txt")},
+		{"Size", []byte("3")},
+		{"Merkle", crypto.Hash256([]byte("ABC"))},
+	}}
 )
 
+const testHeadersJSON = `[
+	{
+		"Ver":"1",
+		"Title":"base64,SGVsbG8sIOS4lueVjA",
+		"Description":"Test header",
+		"Path":"/",
+		"Created":"2022-01-01T01:02:03Z",
+		"Updated":"2022-01-01T01:02:03Z",
+		"Part-Size":"1024",
+		"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",
+		"Signature":"base64,RawwRUohAE9zjGFAGurDPp0ceZvKgDjTByQ5A4/JrLjYqEyQFA+6Ynu9JPCdrK5KxCoEqeBdKRKAd/ZmDQ5dAA"
+	},{
+		"Ver":"1",
+		"Path":"/dir/"
+	},{
+		"Ver":"2",
+		"Path":"/dir/abc.txt",
+		"Size":"3",
+		"Merkle":"base64,tdQEXD9Gb6kf4sxqvnkjKhpXzfEE96JucW4KHieJ33g"
+	}
+]`
+
 func init() {
-	h1.Sign(testPrv)
+	testHeaders[0].Sign(testPrv)
+}
+
+func TestValidateHeader(t *testing.T) {
+	for _, h := range testHeaders {
+		err := ValidateHeader(h)
+		assert.NoError(t, err)
+	}
 }
 
 func TestHeader_String(t *testing.T) {
-	assert.Equal(t, ""+
-		"Ver: 1.0\n"+
-		"Title: Test header\n"+
-		"Hello-Phrase: =?utf-8?b?SGVsbG8sIOS4lueVjA==?=\n"+
-		"Public-Key: Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=\n"+
-		"Signature: =?utf-8?b?vNsD9iL4I3q4Ckle6g6CzlOfB9cuh0vOkivPV3E6HqcFF7M3a7iRYp5dZ6YR?= =?utf-8?b?c1y808LiJ+sGPC2eXkAROQkLCA==?="+
-		"", h1.String())
+	assert.Equal(t, `{`+
+		`"Ver":"1",`+
+		`"Title":"base64,SGVsbG8sIOS4lueVjA",`+
+		`"Description":"Test header",`+
+		`"Path":"/",`+
+		`"Created":"2022-01-01T01:02:03Z",`+
+		`"Updated":"2022-01-01T01:02:03Z",`+
+		`"Part-Size":"1024",`+
+		`"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",`+
+		`"Signature":"base64,RawwRUohAE9zjGFAGurDPp0ceZvKgDjTByQ5A4/JrLjYqEyQFA+6Ynu9JPCdrK5KxCoEqeBdKRKAd/ZmDQ5dAA"`+
+		`}`,
+		testHeaders[0].String(),
+	)
 }
 
-func TestParseHeader(t *testing.T) {
-	const strHeader = "" +
-		"Ver: 1.0\n" +
-		"Title: Test header\n" +
-		"Hello-Phrase: =?utf-8?b?SGVsbG8sIOS4lueVjA==?=\n" +
-		"Public-Key: Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=\n" +
-		"Signature: =?utf-8?b?vNsD9iL4I3q4Ckle6g6CzlOfB9cuh0vOkivPV3E6HqcFF7M3a7iRYp5dZ6YR?= =?utf-8?b?c1y808LiJ+sGPC2eXkAROQkLCA==?="
+func TestHeader_MarshalJSON(t *testing.T) {
 
-	h, err := ParseHeader(strHeader)
+	data, err := json.Marshal(testHeaders)
 
 	assert.NoError(t, err)
-	assert.Equal(t, h.String(), strHeader)
+	assert.JSONEq(t, testHeadersJSON, string(data))
+}
+
+func TestHeader_UnmarshalJSON(t *testing.T) {
+
+	var hh []Header
+	err := json.Unmarshal([]byte(testHeadersJSON), &hh)
+
+	assert.NoError(t, err)
+	assert.Equal(t, testHeaders, hh)
 }
 
 func TestHeader_Hash(t *testing.T) {
 
-	hash := hex.EncodeToString(h1[:len(h1)-1].Hash())
+	h0 := testHeaders[0]
+	hash := hex.EncodeToString(h0[:len(h0)-1].Hash())
 
-	assert.Equal(t, "fad720402a8632cf3982497b9b508924bf92644ce75468622aee8f58bd743eba", hash)
+	assert.Equal(t, "c4f2bda7321becfbae65838c9a34d78754fec160ee918b4361fcf6477f1b8ad9", hash)
 }
 
 func TestHeader_Verify(t *testing.T) {
-	assert.True(t, h1.Verify())
+	assert.True(t, testHeaders[0].Verify())
 }
