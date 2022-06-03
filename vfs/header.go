@@ -2,9 +2,10 @@ package vfs
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"github.com/denisskin/dweb/crypto"
-	"mime"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,13 +15,19 @@ import (
 type Header []HeaderField
 
 type HeaderField struct {
-	Name  string `json:"name"`  //
-	Value []byte `json:"value"` //
+	Name  string //
+	Value []byte //
 }
 
-const headerFieldNameCharset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_."
-
 const MaxHeaderLength = 10 * 1024 // 10 KiB
+
+const (
+	headerFieldNameCharset  = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_."
+	headerBinaryValuePrefix = "base64,"
+	headerTextValueChars    = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_.,:;+=?~!@#$%^&*()<>[]{}/| "
+)
+
+var errInvalidJSON = errors.New("invalid JSON")
 
 // predefined header-field-names
 const (
@@ -73,23 +80,6 @@ func isValidHeaderKey(key string) bool {
 	return containsOnly(key, headerFieldNameCharset)
 }
 
-func encodeHeaderValue(v []byte) string {
-	// todo: use binary encoding (not string)
-	return mime.BEncoding.Encode("utf-8", string(v))
-}
-
-var headerValueDecoder mime.WordDecoder
-
-func decodeHeaderValue(v string) ([]byte, error) {
-	v, err := headerValueDecoder.DecodeHeader(v)
-	return []byte(v), err
-}
-
-func decodeHeaderKey(v string) (string, error) {
-	v, err := headerValueDecoder.DecodeHeader(v)
-	return v, err
-}
-
 func (v HeaderField) Hash() []byte {
 	return crypto.MerkleRoot(
 		crypto.Hash256([]byte(v.Name)),
@@ -97,26 +87,25 @@ func (v HeaderField) Hash() []byte {
 	)
 }
 
-func (v HeaderField) String() string {
-	return encodeHeaderValue([]byte(v.Name)) + ": " + encodeHeaderValue(v.Value)
-}
-
-func (v HeaderField) JSON() string {
-	return "{" + toJSON(v.Name) + ":" + toJSON(v.Value) + "}"
-}
-
 func (v HeaderField) MarshalJSON() ([]byte, error) {
-	return []byte(v.JSON()), nil
+	buf := bytes.NewBufferString("{")
+	buf.Write(marshalKey(v.Name))
+	buf.WriteByte(':')
+	buf.Write(marshalValue(v.Value))
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
 }
 
 func (v *HeaderField) UnmarshalJSON(data []byte) (err error) {
-	var vv map[string][]byte
+	var vv map[string]string
 	if err = json.Unmarshal(data, &vv); err == nil && vv != nil {
 		for k, val := range vv {
-			v.Name, v.Value = k, val
+			v.Name = k
+			v.Value, err = unmarshalValue(val)
+			break
 		}
 	}
-	return err
+	return
 }
 
 //-------------------------------------------------------------
@@ -127,45 +116,80 @@ func (h Header) Copy() Header {
 	return h1
 }
 
-func (h Header) String() (s string) {
-	for i, v := range h {
-		if i > 0 {
-			s += "\n"
-		}
-		s += v.String()
-	}
-	return
-}
-
-func (h Header) JSON() string {
-	s, _ := h.marshalJSON()
+func (h Header) String() string {
+	s, _ := h.MarshalJSON()
 	return string(s)
 }
 
-func (h Header) MarshalText() ([]byte, error) {
-	return []byte(h.String()), nil
-}
-
-func (h *Header) UnmarshalText(data []byte) error {
-	v, err := ParseHeader(string(data))
-	if v != nil {
-		*h = v
-	}
-	return err
-}
-
-func (h Header) marshalJSON() ([]byte, error) {
+func (h Header) MarshalJSON() ([]byte, error) {
 	buf := bytes.NewBufferString("{")
 	for i, v := range h {
 		if i > 0 {
 			buf.WriteByte(',')
 		}
-		buf.WriteString(toJSON(v.Name))
+		buf.Write(marshalKey(v.Name))
 		buf.WriteByte(':')
-		buf.WriteString(jsonEncode(v.Value))
+		buf.Write(marshalValue(v.Value))
 	}
 	buf.WriteByte('}')
 	return buf.Bytes(), nil
+}
+
+func (h *Header) UnmarshalJSON(data []byte) (err error) {
+	n := len(data)
+	if n < 2 || data[0] != '{' || data[n-1] != '}' {
+		return errInvalidJSON
+	}
+	// replace object to array:  {"key":"value",...} -> ["key","value",...]
+	data = bytes.ReplaceAll(data, []byte(`":"`), []byte(`","`))
+	data[0], data[n-1] = '[', ']'
+	var ss []string
+	if err = json.Unmarshal(data, &ss); err != nil {
+		return
+	}
+	*h = (*h)[:0]
+	var kv HeaderField
+	for i, v := range ss {
+		if i%2 == 0 { // key
+			kv.Name = v
+		} else { // value
+			if kv.Value, err = unmarshalValue(v); err != nil {
+				return err
+			}
+			*h = append(*h, kv)
+		}
+	}
+	return
+}
+
+var (
+	txtValChars = []byte(headerTextValueChars)
+	binValPfx   = []byte(headerBinaryValuePrefix)
+)
+
+func marshalKey(v string) []byte {
+	// todo: optimize it; use fast string marshaling
+	b, _ := json.Marshal(v)
+	return b
+}
+
+func marshalValue(v []byte) []byte {
+	buf := bytes.NewBufferString(`"`)
+	if bContainOnly(v, txtValChars) && !bytes.HasPrefix(v, binValPfx) {
+		buf.Write(v)
+	} else {
+		buf.Write(binValPfx)
+		buf.WriteString(base64.RawStdEncoding.EncodeToString(v))
+	}
+	buf.WriteByte('"')
+	return buf.Bytes()
+}
+
+func unmarshalValue(v string) ([]byte, error) {
+	if strings.HasPrefix(v, headerBinaryValuePrefix) {
+		return base64.RawStdEncoding.DecodeString(strings.TrimPrefix(v, headerBinaryValuePrefix))
+	}
+	return []byte(v), nil
 }
 
 //-------------------------------------------
@@ -239,7 +263,7 @@ func (h *Header) AddTime(key string, value time.Time) {
 	h.Add(key, value.Format(time.RFC3339))
 }
 
-func (h *Header) Exclude(key string) {
+func (h *Header) Delete(key string) {
 	for i := h.indexOf(key); i >= 0; i = h.indexOf(key) {
 		c := *h
 		copy(c[i:], c[i+1:])
@@ -329,14 +353,14 @@ func (h Header) PublicKey() crypto.PublicKey {
 }
 
 func (h *Header) SetPublicKey(pub crypto.PublicKey) {
-	//h.Exclude(HeaderPublicKey)
+	//h.Delete(HeaderPublicKey)
 	h.Set(headerPublicKey, pub.Encode())
 }
 
 func (h *Header) Sign(prv crypto.PrivateKey) {
 	h.SetPublicKey(prv.PublicKey())
 
-	h.Exclude(headerSignature)
+	h.Delete(headerSignature)
 	h.AddBytes(headerSignature, prv.Sign(h.Hash()))
 }
 
@@ -349,28 +373,6 @@ func (h Header) Verify() bool {
 
 //--------------------------------------------------------
 
-func ParseHeader(s string) (h Header, err error) {
-	for _, s := range strings.Split(s, "\n") {
-		if s = strings.TrimSpace(s); s != "" {
-			var kv HeaderField
-			if i := strings.IndexByte(s, ':'); i >= 0 {
-				if kv.Name, err = decodeHeaderKey(s[:i]); err != nil {
-					return
-				}
-				if kv.Value, err = decodeHeaderValue(strings.TrimLeft(s[i+2:], " \t")); err != nil {
-					return
-				}
-			} else {
-				if kv.Name, err = decodeHeaderKey(s[:i]); err != nil {
-					return
-				}
-			}
-			h = append(h, kv)
-		}
-	}
-	return
-}
-
 func sortHeaders(hh []Header) {
 	sort.Slice(hh, func(i, j int) bool {
 		return pathLess(hh[i].Path(), hh[j].Path())
@@ -379,7 +381,7 @@ func sortHeaders(hh []Header) {
 
 func traceHeaders(hh []Header) {
 	for _, h := range hh {
-		println("  - ", h.JSON())
+		println("  - ", h.String())
 	}
 	println("")
 }
