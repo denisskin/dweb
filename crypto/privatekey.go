@@ -12,7 +12,7 @@ const (
 	SignatureSize = ed25519.SignatureSize
 )
 
-func NewPrivateKeyBySeed(seed string) PrivateKey {
+func NewPrivateKeyFromSeed(seed string) PrivateKey {
 	return PrivateKey(ed25519.NewKeyFromSeed(Hash256([]byte(seed))))
 }
 
@@ -25,13 +25,14 @@ func (prv PrivateKey) Encode() string {
 }
 
 func (prv PrivateKey) SubKey(name string) PrivateKey {
-	return Hash256(Hash256(prv), Hash256([]byte(name)))
+	seed := Hash256(prv, Hash256([]byte(name)))
+	return PrivateKey(ed25519.NewKeyFromSeed(seed))
 }
 
 func (prv PrivateKey) PublicKey() PublicKey {
 	return PublicKey(ed25519.PrivateKey(prv).Public().(ed25519.PublicKey))
 }
 
-func (prv PrivateKey) Sign(hash []byte) []byte {
-	return ed25519.Sign([]byte(prv), hash)
+func (prv PrivateKey) Sign(message []byte) []byte {
+	return ed25519.Sign([]byte(prv), message)
 }

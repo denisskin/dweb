@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/hex"
 	"strings"
 )
 
@@ -26,11 +25,11 @@ func (pub PublicKey) Equal(p PublicKey) bool {
 	return len(pub) == PublicKeySize && bytes.Equal(pub, p)
 }
 
-func (pub PublicKey) Verify(hash, signature []byte) bool {
+func (pub PublicKey) Verify(message, signature []byte) bool {
 	return len(pub) == PublicKeySize &&
-		len(hash) == HashSize &&
+		// len(message) == HashSize && // ???
 		len(signature) == SignatureSize &&
-		ed25519.Verify([]byte(pub), hash, signature)
+		ed25519.Verify([]byte(pub), message, signature)
 }
 
 func DecodePublicKey(s string) PublicKey {
