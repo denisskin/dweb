@@ -94,3 +94,14 @@ func dirname(path string) string {
 	}
 	return ""
 }
+
+// VersionIsGreater checks that the version of header A is higher than the version of header B
+func VersionIsGreater(a, b Header) bool {
+	if a.Ver() != b.Ver() {
+		return a.Ver() > b.Ver()
+	}
+	//if t1, t2 := a.Updated(), b.Updated(); t1 != t2 {
+	//	return t1.Before(t2)
+	//}
+	return bytes.Compare(a.Hash(), b.Hash()) > 0
+}
