@@ -3,6 +3,7 @@ package crypto
 import (
 	"bytes"
 	"crypto/sha256"
+	"hash"
 	"io"
 )
 
@@ -28,7 +29,7 @@ func merkleRootFn(offset, n int, itemHash func(int) []byte) []byte {
 		return itemHash(offset)
 	}
 	i := merkleMiddle(n)
-	return Hash256(
+	return Hash(
 		merkleRootFn(offset, i, itemHash),
 		merkleRootFn(offset+i, n-i, itemHash),
 	)
@@ -75,9 +76,9 @@ func VerifyMerkleProof(hash, root, proof []byte) bool {
 		}
 		switch op, arg := proof[0], proof[1:opSize]; op {
 		case OpRHash:
-			hash = Hash256(hash, arg)
+			hash = Hash(hash, arg)
 		case OpLHash:
-			hash = Hash256(arg, hash)
+			hash = Hash(arg, hash)
 		default:
 			return false
 		}

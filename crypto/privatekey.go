@@ -7,13 +7,10 @@ import (
 
 type PrivateKey []byte
 
-const (
-	HashSize      = 32
-	SignatureSize = ed25519.SignatureSize
-)
+const SignatureSize = ed25519.SignatureSize
 
 func NewPrivateKeyFromSeed(seed string) PrivateKey {
-	return PrivateKey(ed25519.NewKeyFromSeed(Hash256([]byte(seed))))
+	return PrivateKey(ed25519.NewKeyFromSeed(Hash([]byte(seed))))
 }
 
 func (prv PrivateKey) String() string {
@@ -25,7 +22,7 @@ func (prv PrivateKey) Encode() string {
 }
 
 func (prv PrivateKey) SubKey(name string) PrivateKey {
-	seed := Hash256(prv, Hash256([]byte(name)))
+	seed := Hash(prv, Hash([]byte(name)))
 	return PrivateKey(ed25519.NewKeyFromSeed(seed))
 }
 
