@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	testPrv = crypto.NewPrivateKeyBySeed("private-key-seed")
+	testPrv = crypto.NewPrivateKeyFromSeed("private-key-seed")
 	testPub = testPrv.PublicKey()
 
 	testHeaders = []Header{{
@@ -27,40 +27,44 @@ var (
 		{"Ver", []byte("2")},
 		{"Path", []byte("/dir/abc.txt")},
 		{"Size", []byte("3")},
-		{"Merkle", crypto.Hash256([]byte("ABC"))},
+		{"Merkle", crypto.Hash([]byte("ABC"))},
 	}}
 )
-
-const testHeadersJSON = `[
-	{
-		"Ver":"1",
-		"Title":"base64,SGVsbG8sIOS4lueVjA",
-		"Description":"Test header",
-		"Path":"/",
-		"Created":"2022-01-01T01:02:03Z",
-		"Updated":"2022-01-01T01:02:03Z",
-		"Part-Size":"1024",
-		"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",
-		"Signature":"base64,RawwRUohAE9zjGFAGurDPp0ceZvKgDjTByQ5A4/JrLjYqEyQFA+6Ynu9JPCdrK5KxCoEqeBdKRKAd/ZmDQ5dAA"
-	},{
-		"Ver":"1",
-		"Path":"/dir/"
-	},{
-		"Ver":"2",
-		"Path":"/dir/abc.txt",
-		"Size":"3",
-		"Merkle":"base64,tdQEXD9Gb6kf4sxqvnkjKhpXzfEE96JucW4KHieJ33g"
-	}
-]`
 
 func init() {
 	testHeaders[0].Sign(testPrv)
 }
 
+const testHeadersJSON = `[{
+	"Ver":"1",
+	"Title":"base64,SGVsbG8sIOS4lueVjA",
+	"Description":"Test header",
+	"Path":"/",
+	"Created":"2022-01-01T01:02:03Z",
+	"Updated":"2022-01-01T01:02:03Z",
+	"Part-Size":"1024",
+	"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",
+	"Signature":"base64,HbG7v7CRU9En1Z4hp8jRN6py83aZMAbVJEVar8+CdFBPqTNgOkXG19MwyYHp4c4EmK4ya60cGsxXMwM4dHZEBQ"
+},{
+	"Ver":"1",
+	"Path":"/dir/"
+},{
+	"Ver":"2",
+	"Path":"/dir/abc.txt",
+	"Size":"3",
+	"Merkle":"base64,tdQEXD9Gb6kf4sxqvnkjKhpXzfEE96JucW4KHieJ33g"
+}]`
+
 func TestValidateHeader(t *testing.T) {
 	for _, h := range testHeaders {
 		err := ValidateHeader(h)
 		assert.NoError(t, err)
+	}
+}
+
+func BenchmarkHeader_Hash(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		testHeaders[0].Hash()
 	}
 }
 
@@ -74,7 +78,7 @@ func TestHeader_String(t *testing.T) {
 		`"Updated":"2022-01-01T01:02:03Z",`+
 		`"Part-Size":"1024",`+
 		`"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",`+
-		`"Signature":"base64,RawwRUohAE9zjGFAGurDPp0ceZvKgDjTByQ5A4/JrLjYqEyQFA+6Ynu9JPCdrK5KxCoEqeBdKRKAd/ZmDQ5dAA"`+
+		`"Signature":"base64,HbG7v7CRU9En1Z4hp8jRN6py83aZMAbVJEVar8+CdFBPqTNgOkXG19MwyYHp4c4EmK4ya60cGsxXMwM4dHZEBQ"`+
 		`}`,
 		testHeaders[0].String(),
 	)
@@ -102,7 +106,7 @@ func TestHeader_Hash(t *testing.T) {
 	h0 := testHeaders[0]
 	hash := hex.EncodeToString(h0[:len(h0)-1].Hash())
 
-	assert.Equal(t, "c4f2bda7321becfbae65838c9a34d78754fec160ee918b4361fcf6477f1b8ad9", hash)
+	assert.Equal(t, "6ff712987e55d5efbb6005e05752e8748d046bc1ab6d41994b79a9c044472c0c", hash)
 }
 
 func TestHeader_Verify(t *testing.T) {
