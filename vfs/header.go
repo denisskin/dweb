@@ -3,6 +3,7 @@ package vfs
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"github.com/denisskin/dweb/crypto"
@@ -78,13 +79,6 @@ func ValidateHeader(h Header) error {
 func isValidHeaderKey(key string) bool {
 	// todo: optimize, use charset-table as array  (see net/textproto/reader.go isTokenTable)
 	return containsOnly(key, headerFieldNameCharset)
-}
-
-func (v HeaderField) Hash() []byte {
-	return crypto.MerkleRoot(
-		crypto.Hash256([]byte(v.Name)),
-		crypto.Hash256(v.Value),
-	)
 }
 
 func (v HeaderField) MarshalJSON() ([]byte, error) {
@@ -276,9 +270,20 @@ func (h Header) Hash() []byte {
 	if n > 0 && h[n-1].Name == headerSignature { // exclude last header "Signature"
 		n--
 	}
-	return crypto.MakeMerkleRoot(n, func(i int) []byte {
-		return h[i].Hash()
-	})
+	hsh := crypto.NewHash()
+	buf := make([]byte, 4)
+	for _, kv := range h[:n-1] {
+		// write <len><Name>
+		binary.BigEndian.PutUint32(buf, uint32(len(kv.Name)))
+		hsh.Write(buf)
+		hsh.Write([]byte(kv.Name))
+
+		// write <len><Value>
+		binary.BigEndian.PutUint32(buf, uint32(len(kv.Value)))
+		hsh.Write(buf)
+		hsh.Write(kv.Value)
+	}
+	return hsh.Sum(nil)
 }
 
 func (h Header) Length() (n int) {
