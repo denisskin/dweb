@@ -20,12 +20,15 @@ type HeaderField struct {
 	Value []byte //
 }
 
-const MaxHeaderLength = 10 * 1024 // 10 KiB
+const (
+	MaxHeaderNameLength  = 256
+	MaxHeaderValueLength = 10 * 1024 // 10 KiB
+)
 
 const (
-	headerFieldNameCharset  = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_."
-	headerBinaryValuePrefix = "base64,"
-	headerTextValueChars    = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_.,:;+=?~!@#$%^&*()<>[]{}/| "
+	headerNameCharset       = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_."
+	headerBinaryValuePrefix = "b64,"
+	headerTextValueCharset  = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_.,:;+=?~!@#$%^&*()<>[]{}/| "
 )
 
 var errInvalidJSON = errors.New("invalid JSON")
@@ -33,11 +36,11 @@ var errInvalidJSON = errors.New("invalid JSON")
 // predefined header-field-names
 const (
 	// root header fields
-	headerProtocol       = "Protocol"         //
-	headerPublicKey      = "Public-Key"       //
-	headerSignature      = "Signature"        //
-	headerTreeVolume     = "Tree-Volume"      // volume of full file tree
-	headerTreeMerkleRoot = "Tree-Merkle-Root" // root merkle of full file tree
+	headerProtocol   = "Protocol"    //
+	headerPublicKey  = "Public-Key"  //
+	headerSignature  = "Signature"   //
+	headerTreeVolume = "Volume"      // volume of full file tree
+	headerTreeMerkle = "Merkle-Root" // root merkle of full file tree
 
 	// general
 	headerVer     = "Ver"     // file or dir-version
@@ -60,49 +63,6 @@ func NewRootHeader(pub crypto.PublicKey) (h Header) {
 	h.SetPublicKey(pub)
 	return
 }
-
-func ValidateHeader(h Header) error {
-	if h.Length() > MaxHeaderLength {
-		return errInvalidHeaderLength
-	}
-	for _, kv := range h {
-		if !isValidHeaderKey(kv.Name) {
-			return errInvalidHeaderName
-		}
-	}
-	if !IsValidPath(h.Path()) {
-		return errInvalidPath
-	}
-	return nil
-}
-
-func isValidHeaderKey(key string) bool {
-	// todo: optimize, use charset-table as array  (see net/textproto/reader.go isTokenTable)
-	return containsOnly(key, headerFieldNameCharset)
-}
-
-func (v HeaderField) MarshalJSON() ([]byte, error) {
-	buf := bytes.NewBufferString("{")
-	buf.Write(marshalKey(v.Name))
-	buf.WriteByte(':')
-	buf.Write(marshalValue(v.Value))
-	buf.WriteByte('}')
-	return buf.Bytes(), nil
-}
-
-func (v *HeaderField) UnmarshalJSON(data []byte) (err error) {
-	var vv map[string]string
-	if err = json.Unmarshal(data, &vv); err == nil && vv != nil {
-		for k, val := range vv {
-			v.Name = k
-			v.Value, err = unmarshalValue(val)
-			break
-		}
-	}
-	return
-}
-
-//-------------------------------------------------------------
 
 func (h Header) Copy() Header {
 	h1 := make(Header, len(h))
@@ -157,7 +117,7 @@ func (h *Header) UnmarshalJSON(data []byte) (err error) {
 }
 
 var (
-	txtValChars = []byte(headerTextValueChars)
+	txtValChars = []byte(headerTextValueCharset)
 	binValPfx   = []byte(headerBinaryValuePrefix)
 )
 
@@ -343,7 +303,7 @@ func (h Header) FileMerkle() []byte {
 }
 
 func (h Header) TreeMerkleRoot() []byte {
-	return h.GetBytes(headerTreeMerkleRoot)
+	return h.GetBytes(headerTreeMerkle)
 }
 
 //--------- root-header crypto methods ----------
@@ -377,6 +337,20 @@ func (h Header) Verify() bool {
 }
 
 //--------------------------------------------------------
+
+func ValidateHeader(h Header) error {
+	for _, v := range h {
+		if len(v.Name) > MaxHeaderNameLength ||
+			len(v.Value) > MaxHeaderValueLength ||
+			!containsOnly(v.Name, headerNameCharset) {
+			return errInvalidHeader
+		}
+	}
+	if !IsValidPath(h.Path()) {
+		return errInvalidPath
+	}
+	return nil
+}
 
 func sortHeaders(hh []Header) {
 	sort.Slice(hh, func(i, j int) bool {
