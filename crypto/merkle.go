@@ -2,15 +2,64 @@ package crypto
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"hash"
-	"io"
+	"math"
 )
 
 const (
 	OpLHash = 0
 	OpRHash = 1
 )
+
+type merkleHash struct {
+	partSize int64
+	n        int64
+	hash     hash.Hash
+	nHash    int64
+	parts    [][]byte
+}
+
+func NewMerkleHash(partSize int64) *merkleHash {
+	if partSize <= 0 {
+		partSize = math.MaxInt64
+	}
+	return &merkleHash{
+		partSize: partSize,
+		hash:     NewHash(),
+	}
+}
+
+func (h *merkleHash) Write(data []byte) (n int, err error) {
+	n = len(data)
+	h.n += int64(n)
+	for nBuf := int64(n); h.nHash+nBuf >= h.partSize; {
+		n1 := h.partSize - h.nHash
+		h.hash.Write(data[:n1])
+		nBuf -= n1
+		data = data[n1:]
+		h.parts, h.nHash = append(h.parts, h.hash.Sum(nil)), 0
+		h.hash.Reset()
+	}
+	h.hash.Write(data)
+	h.nHash += int64(len(data))
+	return
+}
+
+func (h *merkleHash) Root() []byte {
+	return MerkleRoot(h.Leaves()...)
+}
+
+func (h *merkleHash) Written() int64 {
+	return h.n
+}
+
+func (h *merkleHash) Leaves() [][]byte {
+	if h.nHash > 0 {
+		h.parts, h.nHash = append(h.parts, h.hash.Sum(nil)), 0
+		h.hash.Reset()
+	}
+	return h.parts
+}
 
 func MerkleRoot(hash ...[]byte) []byte {
 	return MakeMerkleRoot(len(hash), func(i int) []byte {
@@ -85,34 +134,4 @@ func VerifyMerkleProof(hash, root, proof []byte) bool {
 		proof = proof[opSize:]
 	}
 	return bytes.Equal(hash, root)
-}
-
-func ReadMerkleRoot(r io.Reader, size, partSize int64) (merkle []byte, hashes [][]byte, err error) {
-	hashes = make([][]byte, 0, countParts(size, partSize))
-	for size > 0 {
-		w := sha256.New()
-		if n, err := io.CopyN(w, r, min64(partSize, size)); err != nil {
-			return nil, nil, err
-		} else {
-			size -= n
-		}
-		hashes = append(hashes, w.Sum(nil))
-	}
-	merkle = MerkleRoot(hashes...)
-	return
-}
-
-func countParts(size, partSize int64) int {
-	n := size / partSize
-	if size/partSize != 0 {
-		n++
-	}
-	return int(n)
-}
-
-func min64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
 }
