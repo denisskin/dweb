@@ -37,14 +37,14 @@ func init() {
 
 const testHeadersJSON = `[{
 	"Ver":"1",
-	"Title":"base64,SGVsbG8sIOS4lueVjA",
+	"Title":"b64,SGVsbG8sIOS4lueVjA",
 	"Description":"Test header",
 	"Path":"/",
 	"Created":"2022-01-01T01:02:03Z",
 	"Updated":"2022-01-01T01:02:03Z",
 	"Part-Size":"1024",
 	"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",
-	"Signature":"base64,HbG7v7CRU9En1Z4hp8jRN6py83aZMAbVJEVar8+CdFBPqTNgOkXG19MwyYHp4c4EmK4ya60cGsxXMwM4dHZEBQ"
+	"Signature":"b64,HbG7v7CRU9En1Z4hp8jRN6py83aZMAbVJEVar8+CdFBPqTNgOkXG19MwyYHp4c4EmK4ya60cGsxXMwM4dHZEBQ"
 },{
 	"Ver":"1",
 	"Path":"/dir/"
@@ -52,7 +52,7 @@ const testHeadersJSON = `[{
 	"Ver":"2",
 	"Path":"/dir/abc.txt",
 	"Size":"3",
-	"Merkle":"base64,tdQEXD9Gb6kf4sxqvnkjKhpXzfEE96JucW4KHieJ33g"
+	"Merkle":"b64,tdQEXD9Gb6kf4sxqvnkjKhpXzfEE96JucW4KHieJ33g"
 }]`
 
 func TestValidateHeader(t *testing.T) {
@@ -71,14 +71,14 @@ func BenchmarkHeader_Hash(b *testing.B) {
 func TestHeader_String(t *testing.T) {
 	assert.Equal(t, `{`+
 		`"Ver":"1",`+
-		`"Title":"base64,SGVsbG8sIOS4lueVjA",`+
+		`"Title":"b64,SGVsbG8sIOS4lueVjA",`+
 		`"Description":"Test header",`+
 		`"Path":"/",`+
 		`"Created":"2022-01-01T01:02:03Z",`+
 		`"Updated":"2022-01-01T01:02:03Z",`+
 		`"Part-Size":"1024",`+
 		`"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",`+
-		`"Signature":"base64,HbG7v7CRU9En1Z4hp8jRN6py83aZMAbVJEVar8+CdFBPqTNgOkXG19MwyYHp4c4EmK4ya60cGsxXMwM4dHZEBQ"`+
+		`"Signature":"b64,HbG7v7CRU9En1Z4hp8jRN6py83aZMAbVJEVar8+CdFBPqTNgOkXG19MwyYHp4c4EmK4ya60cGsxXMwM4dHZEBQ"`+
 		`}`,
 		testHeaders[0].String(),
 	)
