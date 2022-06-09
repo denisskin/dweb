@@ -11,7 +11,7 @@ const (
 	OpRHash = 1
 )
 
-type merkleHash struct {
+type MerkleHash struct {
 	partSize int64
 	n        int64
 	hash     hash.Hash
@@ -19,17 +19,17 @@ type merkleHash struct {
 	parts    [][]byte
 }
 
-func NewMerkleHash(partSize int64) *merkleHash {
+func NewMerkleHash(partSize int64) *MerkleHash {
 	if partSize <= 0 {
 		partSize = math.MaxInt64
 	}
-	return &merkleHash{
+	return &MerkleHash{
 		partSize: partSize,
 		hash:     NewHash(),
 	}
 }
 
-func (h *merkleHash) Write(data []byte) (n int, err error) {
+func (h *MerkleHash) Write(data []byte) (n int, err error) {
 	n = len(data)
 	h.n += int64(n)
 	for nBuf := int64(n); h.nHash+nBuf >= h.partSize; {
@@ -45,15 +45,15 @@ func (h *merkleHash) Write(data []byte) (n int, err error) {
 	return
 }
 
-func (h *merkleHash) Root() []byte {
+func (h *MerkleHash) Root() []byte {
 	return MerkleRoot(h.Leaves()...)
 }
 
-func (h *merkleHash) Written() int64 {
+func (h *MerkleHash) Written() int64 {
 	return h.n
 }
 
-func (h *merkleHash) Leaves() [][]byte {
+func (h *MerkleHash) Leaves() [][]byte {
 	if h.nHash > 0 {
 		h.parts, h.nHash = append(h.parts, h.hash.Sum(nil)), 0
 		h.hash.Reset()

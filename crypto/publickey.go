@@ -27,7 +27,6 @@ func (pub PublicKey) Equal(p PublicKey) bool {
 
 func (pub PublicKey) Verify(message, signature []byte) bool {
 	return len(pub) == PublicKeySize &&
-		// len(message) == HashSize && // ???
 		len(signature) == SignatureSize &&
 		ed25519.Verify([]byte(pub), message, signature)
 }
