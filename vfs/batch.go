@@ -12,11 +12,23 @@ import (
 
 type Batch struct {
 	Headers []Header
-	Body    io.Reader
+	Body    io.ReadCloser
 }
 
 func (b *Batch) Root() Header {
 	return b.Headers[0]
+}
+
+func (b *Batch) Ver() int64 {
+	return b.Root().Ver()
+}
+
+func (b *Batch) Updated() time.Time {
+	return b.Root().Updated()
+}
+
+func (b *Batch) Hash() []byte {
+	return b.Root().Hash()
 }
 
 func (b *Batch) BodySize() (n int64) {
@@ -38,8 +50,8 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 	ver := root.Ver() + 1       // new ver
 	partSize := root.PartSize() //
 
-	buf := bytes.NewBuffer(nil)
-	batch = &Batch{Body: buf}
+	files := newFilesReader(src)
+	batch = &Batch{Body: files}
 
 	inBatch := map[string]bool{}
 	onDisk := map[string]bool{}
@@ -47,6 +59,9 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 	var hh []Header
 	var diskWalk func(string)
 	diskWalk = func(path string) {
+		if !IsValidPath(path) {
+			return
+		}
 		var err error
 		var dfsPath = path[1:] // trim prefix '/'
 		var isDir = strings.HasSuffix(path, "/")
@@ -60,7 +75,7 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 			h = Header{{headerPath, []byte(path)}}
 		}
 		onDisk[path] = true
-		var fileMerkle, fileCont []byte
+		var fileMerkle []byte
 		var fileSize int64
 		if !isDir {
 			fileSize, fileMerkle, _, err = fsMerkleRoot(src, dfsPath, partSize)
@@ -71,10 +86,7 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 			if !isDir {
 				h.SetInt(headerFileSize, fileSize)
 				h.SetBytes(headerFileMerkle, fileMerkle)
-				fileCont, err = fs.ReadFile(src, dfsPath)
-				assertNoErr(err)
-				_, err = buf.Write(fileCont)
-				assertNoErr(err)
+				files.addFile(dfsPath)
 			}
 			batch.Headers = append(batch.Headers, h)
 			inBatch[path], hh = true, append(hh, h)
@@ -93,6 +105,9 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 				return pathLess(dd[i].Name(), dd[j].Name())
 			})
 			for _, f := range dd {
+				if !isValidPathName(f.Name()) {
+					continue
+				}
 				if f.IsDir() {
 					diskWalk(path + f.Name() + "/")
 				} else {
@@ -143,7 +158,7 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 	}
 	newRoot.SetTime(headerUpdated, ts)
 	newRoot.SetInt(headerTreeVolume, ndRoot.totalVolume())
-	newRoot.SetBytes(headerTreeMerkleRoot, ndRoot.childrenMerkleRoot())
+	newRoot.SetBytes(headerTreeMerkle, ndRoot.childrenMerkleRoot())
 	newRoot.Sign(prv)
 	return
 }
@@ -154,11 +169,9 @@ func fsMerkleRoot(dfs fs.FS, path string, partSize int64) (size int64, merkle []
 		return
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return
-	}
-	size = st.Size()
-	merkle, hashes, err = crypto.ReadMerkleRoot(f, size, partSize)
+
+	w := crypto.NewMerkleHash(partSize)
+	_, err = io.Copy(w, f)
+	size, merkle, hashes = w.Written(), w.Root(), w.Leaves()
 	return
 }
