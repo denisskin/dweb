@@ -50,7 +50,7 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 	ver := root.Ver() + 1       // new ver
 	partSize := root.PartSize() //
 
-	files := newFilesReader(src)
+	files := newFilesReader()
 	batch = &Batch{Body: files}
 
 	inBatch := map[string]bool{}
@@ -86,7 +86,9 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 			if !isDir {
 				h.SetInt(headerFileSize, fileSize)
 				h.SetBytes(headerFileMerkle, fileMerkle)
-				files.addFile(dfsPath)
+				files.add(func() (io.ReadCloser, error) {
+					return src.Open(dfsPath)
+				})
 			}
 			batch.Headers = append(batch.Headers, h)
 			inBatch[path], hh = true, append(hh, h)

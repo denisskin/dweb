@@ -1,49 +1,29 @@
 package vfs
 
-import (
-	"io"
-	"io/fs"
-)
+import "io"
 
 type filesReader struct {
-	fs interface{}
-	pp []string
+	ff []fileOpenFunc
 	r  io.ReadCloser
 }
 
-func newFilesReader(fs interface{}) *filesReader {
-	return &filesReader{fs: fs}
+type fileOpenFunc func() (io.ReadCloser, error)
+
+func newFilesReader() *filesReader {
+	return &filesReader{}
 }
 
-func (f *filesReader) addFile(path string) {
-	f.pp = append(f.pp, path)
-}
-
-func (f *filesReader) open(path string) (io.ReadCloser, error) {
-	switch f := f.fs.(type) {
-	case fs.FS:
-		return f.Open(path)
-
-	case interface {
-		Open(key string) (io.ReadSeekCloser, error)
-	}:
-		return f.Open(path)
-
-	case interface {
-		Open(key string) (io.ReadCloser, error)
-	}:
-		return f.Open(path)
-	}
-	panic("unknown type")
+func (f *filesReader) add(fn fileOpenFunc) {
+	f.ff = append(f.ff, fn)
 }
 
 func (f *filesReader) Read(buf []byte) (n int, err error) {
-	for len(buf) > 0 && len(f.pp) > 0 {
+	for len(buf) > 0 && len(f.ff) > 0 {
 		if f.r == nil {
-			if f.r, err = f.open(f.pp[0]); err != nil {
+			if f.r, err = f.ff[0](); err != nil {
 				return n, err
 			}
-			f.pp = f.pp[1:]
+			f.ff = f.ff[1:]
 		}
 		var m int
 		if m, err = f.r.Read(buf); err == io.EOF {
@@ -61,10 +41,10 @@ func (f *filesReader) Read(buf []byte) (n int, err error) {
 	return
 }
 
-func (f *filesReader) Close() error {
-	if r := f.r; r != nil {
-		f.r = nil
-		return r.Close()
+func (f *filesReader) Close() (err error) {
+	f.ff = nil
+	if f.r != nil {
+		f.r, err = nil, f.r.Close()
 	}
-	return nil
+	return
 }
