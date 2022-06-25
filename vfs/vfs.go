@@ -1,25 +1,37 @@
 package vfs
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strings"
 )
 
+// VFS is Virtual File System
 type VFS interface {
-	FileHeader(path string) (Header, error)
-	FileMerkleProof(path string) (hash, proof []byte, err error)
-	FileParts(path string) (hashes [][]byte, err error)
-	Open(path string) (File, error)
-	ReadDir(path string) ([]Header, error)
-	GetBatch(ver int64) (*Batch, error)
-	PutBatch(*Batch) error
-}
 
-type File interface {
-	io.Reader
-	io.Seeker
-	io.Closer
+	// FileHeader returns Header of file or directory
+	FileHeader(path string) (Header, error)
+
+	// FileMerkleProof returns hash and merkle-proof for file or dir-header
+	FileMerkleProof(path string) (hash, proof []byte, err error)
+
+	// FileParts returns hashes of file-parts
+	FileParts(path string) (hashes [][]byte, err error)
+
+	// OpenAt opens file as descriptor
+	OpenAt(path string, offset int64) (io.ReadCloser, error)
+
+	// ReadDir returns headers of directory files
+	ReadDir(path string) ([]Header, error)
+
+	// GetBatch makes batch starting from the given version
+	GetBatch(ver int64) (*Batch, error)
+
+	Get(request string) (*Batch, error)
+
+	// PutBatch applies batch
+	PutBatch(*Batch) error
 }
 
 const (
@@ -38,11 +50,11 @@ var (
 	ErrNotFound     = errors.New("not found")
 	ErrTooManyFiles = errors.New("too many files")
 
-	errInvalidHeaderLength = errors.New("invalid header length")
-	errInvalidHeaderName   = errors.New("invalid header field name")
-	errInvalidPath         = errors.New("invalid header Path")
+	errInvalidHeader = errors.New("invalid header")
+	errInvalidPath   = errors.New("invalid header Path")
 )
 
+// IsValidPath says the path is valid
 func IsValidPath(path string) bool {
 	if path == "/" {
 		return true

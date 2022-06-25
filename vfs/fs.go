@@ -11,7 +11,7 @@ import (
 type fileSystem struct {
 	pub   crypto.PublicKey
 	db    db.Storage
-	mx    sync.Mutex
+	mx    sync.RWMutex
 	nodes map[string]*fsNode
 }
 
@@ -29,9 +29,9 @@ func (f *fileSystem) setPartSize(size int64) {
 	f.nodes["/"].Header.SetInt(headerPartSize, size)
 }
 
-func (f *fileSystem) PublicKey() crypto.PublicKey {
-	return f.pub
-}
+//func (f *fileSystem) PublicKey() crypto.PublicKey {
+//	return f.pub
+//}
 
 func (f *fileSystem) headers() (hh []Header) {
 	for _, nd := range f.nodes {
@@ -69,6 +69,9 @@ func (f *fileSystem) root() Header {
 }
 
 func (f *fileSystem) FileHeader(path string) (Header, error) {
+	f.mx.RLock()
+	defer f.mx.RUnlock()
+
 	if h := f.fileHeader(path); h != nil {
 		return h.Copy(), nil
 	}
@@ -76,6 +79,9 @@ func (f *fileSystem) FileHeader(path string) (Header, error) {
 }
 
 func (f *fileSystem) FileMerkleProof(path string) (hash, proof []byte, err error) {
+	f.mx.RLock()
+	defer f.mx.RUnlock()
+
 	if f.nodes[path] == nil {
 		return nil, nil, ErrNotFound
 	}
@@ -91,6 +97,9 @@ func (f *fileSystem) rootPartSize() int64 {
 }
 
 func (f *fileSystem) FileParts(path string) (hashes [][]byte, err error) {
+	f.mx.RLock()
+	defer f.mx.RUnlock()
+
 	h := f.fileHeader(path)
 	if h == nil {
 		err = ErrNotFound
@@ -106,12 +115,25 @@ func (f *fileSystem) FileParts(path string) (hashes [][]byte, err error) {
 	if partSize == 0 {
 		partSize = f.rootPartSize()
 	}
-	_, hashes, err = crypto.ReadMerkleRoot(fl, h.FileSize(), partSize)
+	w := crypto.NewMerkleHash(partSize)
+	_, err = io.Copy(w, fl)
+	hashes = w.Leaves()
 	return
 }
 
-func (f *fileSystem) Open(path string) (File, error) {
+func (f *fileSystem) Open(path string) (io.ReadSeekCloser, error) {
 	return f.db.Open(path)
+}
+
+func (f *fileSystem) OpenAt(path string, offset int64) (io.ReadCloser, error) {
+	r, err := f.db.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = r.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 //func (f *fileSystem) FileContent(path string, offset int64, size int) (data []byte, err error) {
@@ -123,20 +145,32 @@ func (f *fileSystem) Open(path string) (File, error) {
 //}
 
 func (f *fileSystem) ReadDir(path string) ([]Header, error) {
+	f.mx.RLock()
+	defer f.mx.RUnlock()
+
 	if d := f.nodes[path]; d != nil && d.isDir() && !d.deleted() {
 		return d.copyChildHeaders(), nil
 	}
 	return nil, ErrNotFound
 }
 
+func (f *fileSystem) Get(req string) (batch *Batch, err error) {
+	f.mx.RLock()
+	defer f.mx.RUnlock()
+
+	return
+}
+
 func (f *fileSystem) GetBatch(ver int64) (batch *Batch, err error) {
+	f.mx.RLock()
+	defer f.mx.RUnlock()
 	defer recoverErr(&err)
 
 	root := f.nodes["/"]
 	if root.Header.Ver() <= ver {
 		return
 	}
-	w := bytes.NewBuffer(nil)
+	w := newFilesReader()
 	batch = &Batch{Body: w}
 	root.walk(func(nd *fsNode) bool {
 		if h := nd.Header; h.Ver() > ver {
@@ -144,11 +178,9 @@ func (f *fileSystem) GetBatch(ver int64) (batch *Batch, err error) {
 
 			// TODO: rr[] = f.getReader(path) ...;  batch.Body = io.MultiReader(rr...)
 			if size := h.FileSize(); size > 0 { // write file content to batch-body
-				fl, err := f.Open(nd.path)
-				assertNoErr(err)
-				defer fl.Close()
-				_, err = io.CopyN(w, fl, size)
-				assertNoErr(err)
+				w.add(func() (io.ReadCloser, error) {
+					return f.Open(nd.path)
+				})
 			}
 		}
 		return true
@@ -169,25 +201,35 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 	r := f.root()
 	b := batch.Root()
 
-	assertNoErr(ValidateHeader(b))
 	assertBool(b.Get(headerProtocol) == DefaultProtocol, "unsupported Protocol")
+	assertNoErr(ValidateHeader(b))
 	assertBool(b.Path() == "/", "invalid batch-header Path")
 	assertBool(b.Ver() > 0, "invalid batch-header Ver")
-	assertBool(b.Ver() > r.Ver(), "invalid batch-header Ver")
 	assertBool(b.PartSize() == r.PartSize(), "invalid batch-header Part-Size")
 	assertBool(!b.Created().IsZero(), "invalid batch-header Created")
 	assertBool(!b.Updated().IsZero(), "invalid batch-header Updated")
-	assertBool(b.Created().Unix() == r.Created().Unix() || r.Created().IsZero(), "invalid batch-header Created")
-	assertBool(b.Updated().Unix() >= b.Created().Unix(), "invalid batch-header Updated")
-	assertBool(b.Updated().Unix() > r.Updated().Unix(), "invalid batch-header Updated")
+	assertBool(b.Created().Equal(r.Created()) || r.Created().IsZero(), "invalid batch-header Created")
+	assertBool(!b.Updated().Before(b.Created()), "invalid batch-header Updated")
+	assertBool(VersionIsGreater(b, r), "invalid batch-header Ver")
 	assertBool(!b.Deleted(), "invalid batch-header Deleted")
 	assertBool(b.PublicKey().Equal(f.pub), "invalid batch-header Public-Key")
 	assertBool(b.Verify(), "invalid batch-header Signature")
 
+	//-----------
+	curTree := f.nodes
+	delFiles := map[string]bool{} // files to delete
+	if b.Ver() == r.Ver() {       // if versions are equal than truncate db
+		curTree = map[string]*fsNode{}
+		for _, nd := range f.nodes {
+			if !nd.isDir() && nd.Header.FileSize() > 0 {
+				delFiles[nd.path] = true
+			}
+		}
+	}
+
 	//--- verify other headers ---
 	updated := make(map[string]Header, len(batch.Headers))
-	hh := make([]Header, 0, len(batch.Headers)+len(f.nodes))
-
+	hh := make([]Header, 0, len(batch.Headers)+len(curTree))
 	for _, h := range batch.Headers {
 		assertNoErr(ValidateHeader(h))
 		path := h.Path()
@@ -201,14 +243,24 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 		} else { // is not deleted file
 			assertBool(h.FileSize() == 0 && !h.Has(headerFileMerkle) || h.FileSize() > 0 && len(h.FileMerkle()) == crypto.HashSize, "invalid batch-header")
 		}
-		if !h.Deleted() { // can`t restore deleted node
-			nd := f.nodes[path]
+		if h.Deleted() { // delete all sub-files
+			curTree[path].walk(func(nd *fsNode) bool {
+				if !nd.isDir() && nd.Header.FileSize() > 0 {
+					delFiles[nd.path] = true
+				}
+				return true
+			})
+		} else { // can`t restore deleted node
+			nd := curTree[path]
 			assertBool(nd == nil || !nd.Header.Deleted(), "invalid batch-header")
 		}
 	}
 	//--- merge with existed headers ---
 	var walk func(*fsNode)
 	walk = func(nd *fsNode) {
+		if nd == nil {
+			return
+		}
 		h := updated[nd.path]
 		if h == nil {
 			hh = append(hh, nd.Header)
@@ -219,16 +271,16 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 			}
 		}
 	}
-	walk(f.nodes["/"])
+	walk(curTree["/"])
 
 	//--- update tree
 	sortHeaders(hh)
-	newNodes, err := indexTree(hh)
+	newTree, err := indexTree(hh)
 	assertNoErr(err)
 
 	//--- verify new root merkle and total-volume (Tree-Merkle, Tree-Volume headers)
-	newMerkle := newNodes["/"].childrenMerkleRoot()
-	totalVolume := newNodes["/"].totalVolume()
+	newMerkle := newTree["/"].childrenMerkleRoot()
+	totalVolume := newTree["/"].totalVolume()
 	assertBool(bytes.Equal(newMerkle, b.TreeMerkleRoot()), "invalid batch-header Tree-Merkle-Root")
 	assertBool(totalVolume == b.GetInt(headerTreeVolume), "invalid batch-header Tree-Volume")
 
@@ -250,18 +302,29 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 				}
 				assertBool(partSize > 0, "empty batch-header Part-Size")
 
-				cont := make([]byte, int(hSize))
-				n, err := io.ReadFull(batch.Body, cont)
+				r := io.LimitReader(batch.Body, hSize)
+				w := crypto.NewMerkleHash(partSize)
+				err = tx.Put(h.Path(), io.TeeReader(r, w))
 				assertNoErr(err)
-				assertBool(int64(n) == hSize, "invalid batch-content")
+				assertBool(w.Written() == hSize, "invalid batch-content")
+				assertBool(bytes.Equal(w.Root(), h.FileMerkle()), "invalid batch-header Merkle")
+				delete(delFiles, h.Path())
 
-				merkle, _, _ := crypto.ReadMerkleRoot(bytes.NewBuffer(cont), hSize, partSize)
-				//assertBool(hSize == sz, "invalid batch-header Size")
-				assertBool(bytes.Equal(h.FileMerkle(), merkle), "invalid batch-header Merkle")
+				//-------- v0
+				//cont := make([]byte, int(hSize))
+				//n, err := io.ReadFull(batch.Body, cont)
+				//assertNoErr(err)
+				//assertBool(int64(n) == hSize, "invalid batch-content")
+				//
+				//merkle, _, _ := crypto.ReadMerkleRoot(bytes.NewBuffer(cont), hSize, partSize)
+				////assertBool(hSize == sz, "invalid batch-header Size")
+				//assertBool(bytes.Equal(h.FileMerkle(), merkle), "invalid batch-header Merkle")
+				//
+				//err = tx.Put(h.Path(), bytes.NewBuffer(cont))
+				//assertNoErr(err)
+				//delete(delFiles, h.Path())
 
-				err = tx.Put(h.Path(), bytes.NewBuffer(cont))
-				assertNoErr(err)
-
+				//-----------
 				// TODO: r := crypto.NewMerkleReader(batch.Body, hSize, h.PartSize())
 				// tx.Put(key, r) // put reader
 				// assertBool(bytes.Equal(h.Merkle(), r.MerkleRoot()))
@@ -277,11 +340,17 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 				//}
 			}
 		}
+
+		//--- delete old files (???) -----
+		for path := range delFiles {
+			err = tx.Delete(path)
+			assertNoErr(err)
+		}
 		//--- save to Storage
 		return db.PutJSON(tx, dbKeyHeaders, hh)
 	})
 
 	assertNoErr(err)
-	f.nodes = newNodes
+	f.nodes = newTree
 	return
 }

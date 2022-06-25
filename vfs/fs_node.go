@@ -18,19 +18,19 @@ var (
 	errParentDirIsDeleted = errors.New("parent dir is deleted")
 )
 
-func indexTree(hh []Header) (nodes map[string]*fsNode, err error) {
-	nodes = make(map[string]*fsNode, len(hh))
+func indexTree(hh []Header) (tree map[string]*fsNode, err error) {
+	tree = make(map[string]*fsNode, len(hh))
 	for _, h := range hh {
 		path := h.Path()
-		if nodes[path] != nil { // can`t repeat
+		if tree[path] != nil { // can`t repeat
 			return nil, errSeveralNodes
 		}
 		nd := &fsNode{Header: h, path: path}
-		nodes[path] = nd
+		tree[path] = nd
 		if path == "/" {
 			continue
 		}
-		if p := nodes[dirname(path)]; p == nil { // find parent node
+		if p := tree[dirname(path)]; p == nil { // find parent node
 			return nil, errParentDirNotFound
 		} else if p.Header.Deleted() {
 			return nil, errParentDirIsDeleted
@@ -41,30 +41,6 @@ func indexTree(hh []Header) (nodes map[string]*fsNode, err error) {
 	return
 }
 
-//func (nd *fsNode) setChild(ch *fsNode) {
-//	if nd.Header.Deleted() {
-//		panic(errParentDirIsDeleted)
-//	}
-//	// todo: ? bin-search i := sort.Search(len(nd.children), func(i int) bool { return nd.children[i].path <=ch.path  })
-//	for i, c := range nd.children {
-//		if c.path == ch.path {
-//			nd.children[i] = ch
-//			return
-//		}
-//	}
-//	nd.children = append(nd.children, ch)
-//}
-
-//func (nd *fsNode) clone() *fsNode {
-//	cc := make([]*fsNode, len(nd.children))
-//	copy(cc, nd.children)
-//	return &fsNode{
-//		Header:   nd.Header.Copy(),
-//		path:     nd.path,
-//		children: cc,
-//	}
-//}
-
 func (nd *fsNode) copyChildHeaders() []Header {
 	hh := make([]Header, len(nd.children))
 	for i, c := range nd.children {
@@ -74,7 +50,7 @@ func (nd *fsNode) copyChildHeaders() []Header {
 }
 
 func (nd *fsNode) walk(fn func(nd *fsNode) bool) {
-	if fn(nd) {
+	if nd != nil && fn(nd) {
 		for _, c := range nd.children {
 			c.walk(fn)
 		}
