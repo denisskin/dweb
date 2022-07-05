@@ -13,6 +13,7 @@ type Storage interface {
 
 type Transaction interface {
 	Put(key string, value io.Reader) error
+	Delete(key string) error
 }
 
 func GetJSON(db Storage, key string, v interface{}) (err error) {
