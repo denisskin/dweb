@@ -25,13 +25,13 @@ type VFS interface {
 	// ReadDir returns headers of directory files
 	ReadDir(path string) ([]Header, error)
 
-	// GetBatch makes batch starting from the given version
-	GetBatch(ver int64) (*Batch, error)
+	// GetCommit makes commit starting from the given version
+	GetCommit(ver int64) (*Commit, error)
 
-	Get(request string) (*Batch, error)
+	Get(request string) (*Commit, error)
 
-	// PutBatch applies batch
-	PutBatch(*Batch) error
+	// Commit applies a commit
+	Commit(*Commit) error
 }
 
 const (

@@ -10,39 +10,39 @@ import (
 	"time"
 )
 
-type Batch struct {
+type Commit struct {
 	Headers []Header
 	Body    io.ReadCloser
 }
 
-func (b *Batch) Root() Header {
-	return b.Headers[0]
+func (c *Commit) Root() Header {
+	return c.Headers[0]
 }
 
-func (b *Batch) Ver() int64 {
-	return b.Root().Ver()
+func (c *Commit) Ver() int64 {
+	return c.Root().Ver()
 }
 
-func (b *Batch) Updated() time.Time {
-	return b.Root().Updated()
+func (c *Commit) Updated() time.Time {
+	return c.Root().Updated()
 }
 
-func (b *Batch) Hash() []byte {
-	return b.Root().Hash()
+func (c *Commit) Hash() []byte {
+	return c.Root().Hash()
 }
 
-func (b *Batch) BodySize() (n int64) {
-	for _, h := range b.Headers {
+func (c *Commit) BodySize() (n int64) {
+	for _, h := range c.Headers {
 		n += h.FileSize()
 	}
 	return
 }
 
-func (b *Batch) Trace() {
-	traceHeaders(b.Headers)
+func (c *Commit) Trace() {
+	traceHeaders(c.Headers)
 }
 
-func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *Batch, err error) {
+func MakeCommit(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (commit *Commit, err error) {
 	defer recoverErr(&err)
 
 	root, err := vfs.FileHeader("/")
@@ -51,7 +51,7 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 	partSize := root.PartSize() //
 
 	files := newFilesReader()
-	batch = &Batch{Body: files}
+	commit = &Commit{Body: files}
 
 	inBatch := map[string]bool{}
 	onDisk := map[string]bool{}
@@ -90,7 +90,7 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 					return src.Open(dfsPath)
 				})
 			}
-			batch.Headers = append(batch.Headers, h)
+			commit.Headers = append(commit.Headers, h)
 			inBatch[path], hh = true, append(hh, h)
 		}
 		if isDir { //- read dir
@@ -120,7 +120,7 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 	}
 	diskWalk("/")
 
-	//-- add old headers to batch
+	//-- add old headers to commit
 	var vfsWalk func(Header)
 	vfsWalk = func(h Header) {
 		path := h.Path()
@@ -129,7 +129,7 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 			h.SetInt(headerVer, ver)
 			h.SetInt(headerDeleted, 1)
 			hh = append(hh, h)
-			batch.Headers = append(batch.Headers, h)
+			commit.Headers = append(commit.Headers, h)
 			return // skip all child nodes
 		}
 		if !inBatch[path] {
@@ -146,15 +146,15 @@ func MakeBatch(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (batch *
 	}
 	vfsWalk(root)
 
-	//-- calc new batch merkle
-	sortHeaders(batch.Headers)
+	//-- calc new commit merkle
+	sortHeaders(commit.Headers)
 	sortHeaders(hh)
 	newTree, err := indexTree(hh)
 	assertNoErr(err)
 	ndRoot := newTree["/"]
 
 	//--- set merkle + sign
-	newRoot := &batch.Headers[0]
+	newRoot := &commit.Headers[0]
 	if !newRoot.Has(headerCreated) {
 		newRoot.SetTime(headerCreated, ts)
 	}

@@ -34,6 +34,7 @@ func recoverErr(err *error) {
 }
 
 func containsOnly(s, chars string) bool {
+	// todo: optimize, use charset-table as array  (see net/textproto/reader.go isTokenTable)
 	for _, c := range s {
 		if strings.IndexRune(chars, c) == -1 {
 			return false

@@ -154,14 +154,14 @@ func (f *fileSystem) ReadDir(path string) ([]Header, error) {
 	return nil, ErrNotFound
 }
 
-func (f *fileSystem) Get(req string) (batch *Batch, err error) {
+func (f *fileSystem) Get(req string) (commit *Commit, err error) {
 	f.mx.RLock()
 	defer f.mx.RUnlock()
 
 	return
 }
 
-func (f *fileSystem) GetBatch(ver int64) (batch *Batch, err error) {
+func (f *fileSystem) GetCommit(ver int64) (commit *Commit, err error) {
 	f.mx.RLock()
 	defer f.mx.RUnlock()
 	defer recoverErr(&err)
@@ -171,13 +171,13 @@ func (f *fileSystem) GetBatch(ver int64) (batch *Batch, err error) {
 		return
 	}
 	w := newFilesReader()
-	batch = &Batch{Body: w}
+	commit = &Commit{Body: w}
 	root.walk(func(nd *fsNode) bool {
 		if h := nd.Header; h.Ver() > ver {
-			batch.Headers = append(batch.Headers, h.Copy())
+			commit.Headers = append(commit.Headers, h.Copy())
 
-			// TODO: rr[] = f.getReader(path) ...;  batch.Body = io.MultiReader(rr...)
-			if size := h.FileSize(); size > 0 { // write file content to batch-body
+			// TODO: rr[] = f.getReader(path) ...;  commit.Body = io.MultiReader(rr...)
+			if size := h.FileSize(); size > 0 { // write file content to commit-body
 				w.add(func() (io.ReadCloser, error) {
 					return f.Open(nd.path)
 				})
@@ -188,32 +188,32 @@ func (f *fileSystem) GetBatch(ver int64) (batch *Batch, err error) {
 	return
 }
 
-func (f *fileSystem) PutBatch(batch *Batch) (err error) {
+func (f *fileSystem) Commit(commit *Commit) (err error) {
 	f.mx.Lock()
 	defer f.mx.Unlock()
 	defer recoverErr(&err)
 
-	//--- verify batch ---
-	assertBool(len(batch.Headers) > 0, "empty batch")
-	sortHeaders(batch.Headers)
+	//--- verify commit ---
+	assertBool(len(commit.Headers) > 0, "empty commit")
+	sortHeaders(commit.Headers)
 
 	//--- verify root-header ---
 	r := f.root()
-	b := batch.Root()
+	b := commit.Root()
 
 	assertBool(b.Get(headerProtocol) == DefaultProtocol, "unsupported Protocol")
 	assertNoErr(ValidateHeader(b))
-	assertBool(b.Path() == "/", "invalid batch-header Path")
-	assertBool(b.Ver() > 0, "invalid batch-header Ver")
-	assertBool(b.PartSize() == r.PartSize(), "invalid batch-header Part-Size")
-	assertBool(!b.Created().IsZero(), "invalid batch-header Created")
-	assertBool(!b.Updated().IsZero(), "invalid batch-header Updated")
-	assertBool(b.Created().Equal(r.Created()) || r.Created().IsZero(), "invalid batch-header Created")
-	assertBool(!b.Updated().Before(b.Created()), "invalid batch-header Updated")
-	assertBool(VersionIsGreater(b, r), "invalid batch-header Ver")
-	assertBool(!b.Deleted(), "invalid batch-header Deleted")
-	assertBool(b.PublicKey().Equal(f.pub), "invalid batch-header Public-Key")
-	assertBool(b.Verify(), "invalid batch-header Signature")
+	assertBool(b.Path() == "/", "invalid commit-header Path")
+	assertBool(b.Ver() > 0, "invalid commit-header Ver")
+	assertBool(b.PartSize() == r.PartSize(), "invalid commit-header Part-Size")
+	assertBool(!b.Created().IsZero(), "invalid commit-header Created")
+	assertBool(!b.Updated().IsZero(), "invalid commit-header Updated")
+	assertBool(b.Created().Equal(r.Created()) || r.Created().IsZero(), "invalid commit-header Created")
+	assertBool(!b.Updated().Before(b.Created()), "invalid commit-header Updated")
+	assertBool(VersionIsGreater(b, r), "invalid commit-header Ver")
+	assertBool(!b.Deleted(), "invalid commit-header Deleted")
+	assertBool(b.PublicKey().Equal(f.pub), "invalid commit-header Public-Key")
+	assertBool(b.Verify(), "invalid commit-header Signature")
 
 	//-----------
 	curTree := f.nodes
@@ -228,20 +228,20 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 	}
 
 	//--- verify other headers ---
-	updated := make(map[string]Header, len(batch.Headers))
-	hh := make([]Header, 0, len(batch.Headers)+len(curTree))
-	for _, h := range batch.Headers {
+	updated := make(map[string]Header, len(commit.Headers))
+	hh := make([]Header, 0, len(commit.Headers)+len(curTree))
+	for _, h := range commit.Headers {
 		assertNoErr(ValidateHeader(h))
 		path := h.Path()
 		hh = append(hh, h)
 		updated[path] = h
 
-		// verify batch-content
+		// verify commit-content
 		if h.IsDir() || h.Deleted() { // dir or deleted file
-			assertBool(!h.Has(headerFileMerkle), "invalid batch-header")
-			assertBool(!h.Has(headerFileSize), "invalid batch-header")
+			assertBool(!h.Has(headerFileMerkle), "invalid commit-header")
+			assertBool(!h.Has(headerFileSize), "invalid commit-header")
 		} else { // is not deleted file
-			assertBool(h.FileSize() == 0 && !h.Has(headerFileMerkle) || h.FileSize() > 0 && len(h.FileMerkle()) == crypto.HashSize, "invalid batch-header")
+			assertBool(h.FileSize() == 0 && !h.Has(headerFileMerkle) || h.FileSize() > 0 && len(h.FileMerkle()) == crypto.HashSize, "invalid commit-header")
 		}
 		if h.Deleted() { // delete all sub-files
 			curTree[path].walk(func(nd *fsNode) bool {
@@ -252,7 +252,7 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 			})
 		} else { // can`t restore deleted node
 			nd := curTree[path]
-			assertBool(nd == nil || !nd.Header.Deleted(), "invalid batch-header")
+			assertBool(nd == nil || !nd.Header.Deleted(), "invalid commit-header")
 		}
 	}
 	//--- merge with existed headers ---
@@ -281,8 +281,8 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 	//--- verify new root merkle and total-volume (Tree-Merkle, Tree-Volume headers)
 	newMerkle := newTree["/"].childrenMerkleRoot()
 	totalVolume := newTree["/"].totalVolume()
-	assertBool(bytes.Equal(newMerkle, b.TreeMerkleRoot()), "invalid batch-header Tree-Merkle-Root")
-	assertBool(totalVolume == b.GetInt(headerTreeVolume), "invalid batch-header Tree-Volume")
+	assertBool(bytes.Equal(newMerkle, b.TreeMerkleRoot()), "invalid commit-header Tree-Merkle-Root")
+	assertBool(totalVolume == b.GetInt(headerTreeVolume), "invalid commit-header Tree-Volume")
 
 	rootPartSize := b.PartSize()
 	//if rootPartSize == 0 {
@@ -293,42 +293,42 @@ func (f *fileSystem) PutBatch(batch *Batch) (err error) {
 	err = f.db.Execute(func(tx db.Transaction) (err error) {
 		defer recoverErr(&err)
 
-		for _, h := range batch.Headers {
+		for _, h := range commit.Headers {
 			if hSize, hMerkle := h.FileSize(), h.FileMerkle(); hSize > 0 || len(hMerkle) != 0 {
 
 				partSize := h.PartSize()
 				if partSize == 0 {
 					partSize = rootPartSize
 				}
-				assertBool(partSize > 0, "empty batch-header Part-Size")
+				assertBool(partSize > 0, "empty commit-header Part-Size")
 
-				r := io.LimitReader(batch.Body, hSize)
+				r := io.LimitReader(commit.Body, hSize)
 				w := crypto.NewMerkleHash(partSize)
 				err = tx.Put(h.Path(), io.TeeReader(r, w))
 				assertNoErr(err)
-				assertBool(w.Written() == hSize, "invalid batch-content")
-				assertBool(bytes.Equal(w.Root(), h.FileMerkle()), "invalid batch-header Merkle")
+				assertBool(w.Written() == hSize, "invalid commit-content")
+				assertBool(bytes.Equal(w.Root(), h.FileMerkle()), "invalid commit-header Merkle")
 				delete(delFiles, h.Path())
 
 				//-------- v0
 				//cont := make([]byte, int(hSize))
-				//n, err := io.ReadFull(batch.Body, cont)
+				//n, err := io.ReadFull(commit.Body, cont)
 				//assertNoErr(err)
-				//assertBool(int64(n) == hSize, "invalid batch-content")
+				//assertBool(int64(n) == hSize, "invalid commit-content")
 				//
 				//merkle, _, _ := crypto.ReadMerkleRoot(bytes.NewBuffer(cont), hSize, partSize)
-				////assertBool(hSize == sz, "invalid batch-header Size")
-				//assertBool(bytes.Equal(h.FileMerkle(), merkle), "invalid batch-header Merkle")
+				////assertBool(hSize == sz, "invalid commit-header Size")
+				//assertBool(bytes.Equal(h.FileMerkle(), merkle), "invalid commit-header Merkle")
 				//
 				//err = tx.Put(h.Path(), bytes.NewBuffer(cont))
 				//assertNoErr(err)
 				//delete(delFiles, h.Path())
 
 				//-----------
-				// TODO: r := crypto.NewMerkleReader(batch.Body, hSize, h.PartSize())
+				// TODO: r := crypto.NewMerkleReader(commit.Body, hSize, h.PartSize())
 				// tx.Put(key, r) // put reader
 				// assertBool(bytes.Equal(h.Merkle(), r.MerkleRoot()))
-				// assertBool(r.ReadSize() == size, "invalid batch-header Size")
+				// assertBool(r.ReadSize() == size, "invalid commit-header Size")
 
 				// todo: put content by hash (put if not exists, delete on error)
 				//key:=fmt.Sprintf("X%x", merkle[:16])
