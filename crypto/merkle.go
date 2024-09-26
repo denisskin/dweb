@@ -11,7 +11,14 @@ const (
 	OpRHash = 1
 )
 
-type MerkleHash struct {
+type MerkleHash interface {
+	Write([]byte) (n int, err error)
+	Root() []byte
+	Written() int64
+	Leaves() [][]byte
+}
+
+type merkleHash struct {
 	partSize int64
 	n        int64
 	hash     hash.Hash
@@ -19,17 +26,17 @@ type MerkleHash struct {
 	parts    [][]byte
 }
 
-func NewMerkleHash(partSize int64) *MerkleHash {
+func NewMerkleHash(partSize int64) MerkleHash {
 	if partSize <= 0 {
 		partSize = math.MaxInt64
 	}
-	return &MerkleHash{
+	return &merkleHash{
 		partSize: partSize,
 		hash:     NewHash(),
 	}
 }
 
-func (h *MerkleHash) Write(data []byte) (n int, err error) {
+func (h *merkleHash) Write(data []byte) (n int, err error) {
 	n = len(data)
 	h.n += int64(n)
 	for nBuf := int64(n); h.nHash+nBuf >= h.partSize; {
@@ -45,15 +52,15 @@ func (h *MerkleHash) Write(data []byte) (n int, err error) {
 	return
 }
 
-func (h *MerkleHash) Root() []byte {
+func (h *merkleHash) Root() []byte {
 	return MerkleRoot(h.Leaves()...)
 }
 
-func (h *MerkleHash) Written() int64 {
+func (h *merkleHash) Written() int64 {
 	return h.n
 }
 
-func (h *MerkleHash) Leaves() [][]byte {
+func (h *merkleHash) Leaves() [][]byte {
 	if h.nHash > 0 {
 		h.parts, h.nHash = append(h.parts, h.hash.Sum(nil)), 0
 		h.hash.Reset()
@@ -84,7 +91,7 @@ func merkleRootFn(offset, n int, itemHash func(int) []byte) []byte {
 	)
 }
 
-func MakeMerkleProof(hashes [][]byte, i int) (buf []byte) {
+func MakeMerkleWitness(hashes [][]byte, i int) (buf []byte) {
 	n := len(hashes)
 	if i < 0 || i >= n {
 		panic("invalid tree")
@@ -93,22 +100,22 @@ func MakeMerkleProof(hashes [][]byte, i int) (buf []byte) {
 		return hashes[0]
 	}
 	if i2 := merkleMiddle(n); i < i2 { // arg=HASH(arg|op)
-		return MerkleProofAppend(
-			MakeMerkleProof(hashes[:i2], i),
+		return MerkleWitnessAppend(
+			MakeMerkleWitness(hashes[:i2], i),
 			OpRHash,
 			MerkleRoot(hashes[i2:]...),
 		)
 	} else { // arg=HASH(op|arg)
-		return MerkleProofAppend(
-			MakeMerkleProof(hashes[i2:], i-i2),
+		return MerkleWitnessAppend(
+			MakeMerkleWitness(hashes[i2:], i-i2),
 			OpLHash,
 			MerkleRoot(hashes[:i2]...),
 		)
 	}
 }
 
-func MerkleProofAppend(proof []byte, op byte, hash []byte) []byte {
-	return append(append(proof, op), hash...)
+func MerkleWitnessAppend(witness []byte, op byte, hash []byte) []byte {
+	return append(append(witness, op), hash...)
 }
 
 func merkleMiddle(n int) (i int) {
@@ -117,13 +124,13 @@ func merkleMiddle(n int) (i int) {
 	return i >> 1
 }
 
-func VerifyMerkleProof(hash, root, proof []byte) bool {
+func VerifyMerkleWitness(hash, root, witness []byte) bool {
 	const opSize = HashSize + 1
-	for n := len(proof); n > 0; n -= opSize {
+	for n := len(witness); n > 0; n -= opSize {
 		if n < opSize {
 			return false
 		}
-		switch op, arg := proof[0], proof[1:opSize]; op {
+		switch op, arg := witness[0], witness[1:opSize]; op {
 		case OpRHash:
 			hash = Hash(hash, arg)
 		case OpLHash:
@@ -131,7 +138,7 @@ func VerifyMerkleProof(hash, root, proof []byte) bool {
 		default:
 			return false
 		}
-		proof = proof[opSize:]
+		witness = witness[opSize:]
 	}
 	return bytes.Equal(hash, root)
 }
