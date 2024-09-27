@@ -18,11 +18,13 @@ type fileSystem struct {
 const dbKeyHeaders = "."
 
 func OpenVFS(pub crypto.PublicKey, db db.Storage) (_ VFS, err error) {
+	defer catch(&err)
 	s := &fileSystem{
 		pub: pub,
 		db:  db,
 	}
-	return s, s.initDB()
+	s.initDB()
+	return s, nil
 }
 
 func (f *fileSystem) setPartSize(size int64) {
@@ -45,16 +47,13 @@ func (f *fileSystem) Trace() {
 	traceHeaders(f.headers())
 }
 
-func (f *fileSystem) initDB() (err error) {
+func (f *fileSystem) initDB() {
 	var hh []Header
-	if err = db.GetJSON(f.db, dbKeyHeaders, &hh); err != nil {
-		return
-	}
+	try(db.GetJSON(f.db, dbKeyHeaders, &hh))
 	if hh == nil { // empty db
 		hh = []Header{NewRootHeader(f.pub)}
 	}
-	f.nodes, err = indexTree(hh)
-	return
+	f.nodes = tryVal(indexTree(hh))
 }
 
 func (f *fileSystem) fileHeader(path string) Header {
@@ -78,15 +77,15 @@ func (f *fileSystem) FileHeader(path string) (Header, error) {
 	return nil, ErrNotFound
 }
 
-func (f *fileSystem) FileMerkleProof(path string) (hash, proof []byte, err error) {
+func (f *fileSystem) FileMerkleWitness(path string) (hash, witness []byte, err error) {
 	f.mx.RLock()
 	defer f.mx.RUnlock()
 
 	if f.nodes[path] == nil {
 		return nil, nil, ErrNotFound
 	}
-	proof = f.nodes["/"].childrenMerkleProof(path)
-	return proof[:crypto.HashSize], proof[crypto.HashSize:], nil
+	witness = f.nodes["/"].childrenMerkleWitness(path)
+	return witness[:crypto.HashSize], witness[crypto.HashSize:], nil
 }
 
 func (f *fileSystem) rootPartSize() int64 {
@@ -164,7 +163,7 @@ func (f *fileSystem) Get(req string) (commit *Commit, err error) {
 func (f *fileSystem) GetCommit(ver int64) (commit *Commit, err error) {
 	f.mx.RLock()
 	defer f.mx.RUnlock()
-	defer recoverErr(&err)
+	defer catch(&err)
 
 	root := f.nodes["/"]
 	if root.Header.Ver() <= ver {
@@ -191,29 +190,29 @@ func (f *fileSystem) GetCommit(ver int64) (commit *Commit, err error) {
 func (f *fileSystem) Commit(commit *Commit) (err error) {
 	f.mx.Lock()
 	defer f.mx.Unlock()
-	defer recoverErr(&err)
+	defer catch(&err)
 
 	//--- verify commit ---
-	assertBool(len(commit.Headers) > 0, "empty commit")
+	require(len(commit.Headers) > 0, "empty commit")
 	sortHeaders(commit.Headers)
 
 	//--- verify root-header ---
 	r := f.root()
 	b := commit.Root()
 
-	assertBool(b.Get(headerProtocol) == DefaultProtocol, "unsupported Protocol")
-	assertNoErr(ValidateHeader(b))
-	assertBool(b.Path() == "/", "invalid commit-header Path")
-	assertBool(b.Ver() > 0, "invalid commit-header Ver")
-	assertBool(b.PartSize() == r.PartSize(), "invalid commit-header Part-Size")
-	assertBool(!b.Created().IsZero(), "invalid commit-header Created")
-	assertBool(!b.Updated().IsZero(), "invalid commit-header Updated")
-	assertBool(b.Created().Equal(r.Created()) || r.Created().IsZero(), "invalid commit-header Created")
-	assertBool(!b.Updated().Before(b.Created()), "invalid commit-header Updated")
-	assertBool(VersionIsGreater(b, r), "invalid commit-header Ver")
-	assertBool(!b.Deleted(), "invalid commit-header Deleted")
-	assertBool(b.PublicKey().Equal(f.pub), "invalid commit-header Public-Key")
-	assertBool(b.Verify(), "invalid commit-header Signature")
+	require(b.Get(headerProtocol) == DefaultProtocol, "unsupported Protocol")
+	try(ValidateHeader(b))
+	require(b.Path() == "/", "invalid commit-header Path")
+	require(b.Ver() > 0, "invalid commit-header Ver")
+	require(b.PartSize() == r.PartSize(), "invalid commit-header Part-Size")
+	require(!b.Created().IsZero(), "invalid commit-header Created")
+	require(!b.Updated().IsZero(), "invalid commit-header Updated")
+	require(b.Created().Equal(r.Created()) || r.Created().IsZero(), "invalid commit-header Created")
+	require(!b.Updated().Before(b.Created()), "invalid commit-header Updated")
+	require(VersionIsGreater(b, r), "invalid commit-header Ver")
+	require(!b.Deleted(), "invalid commit-header Deleted")
+	require(b.PublicKey().Equal(f.pub), "invalid commit-header Public-Key")
+	require(b.Verify(), "invalid commit-header Signature")
 
 	//-----------
 	curTree := f.nodes
@@ -231,17 +230,17 @@ func (f *fileSystem) Commit(commit *Commit) (err error) {
 	updated := make(map[string]Header, len(commit.Headers))
 	hh := make([]Header, 0, len(commit.Headers)+len(curTree))
 	for _, h := range commit.Headers {
-		assertNoErr(ValidateHeader(h))
+		try(ValidateHeader(h))
 		path := h.Path()
 		hh = append(hh, h)
 		updated[path] = h
 
 		// verify commit-content
 		if h.IsDir() || h.Deleted() { // dir or deleted file
-			assertBool(!h.Has(headerFileMerkle), "invalid commit-header")
-			assertBool(!h.Has(headerFileSize), "invalid commit-header")
+			require(!h.Has(headerFileMerkle), "invalid commit-header")
+			require(!h.Has(headerFileSize), "invalid commit-header")
 		} else { // is not deleted file
-			assertBool(h.FileSize() == 0 && !h.Has(headerFileMerkle) || h.FileSize() > 0 && len(h.FileMerkle()) == crypto.HashSize, "invalid commit-header")
+			require(h.FileSize() == 0 && !h.Has(headerFileMerkle) || h.FileSize() > 0 && len(h.FileMerkle()) == crypto.HashSize, "invalid commit-header")
 		}
 		if h.Deleted() { // delete all sub-files
 			curTree[path].walk(func(nd *fsNode) bool {
@@ -252,7 +251,7 @@ func (f *fileSystem) Commit(commit *Commit) (err error) {
 			})
 		} else { // can`t restore deleted node
 			nd := curTree[path]
-			assertBool(nd == nil || !nd.Header.Deleted(), "invalid commit-header")
+			require(nd == nil || !nd.Header.Deleted(), "invalid commit-header")
 		}
 	}
 	//--- merge with existed headers ---
@@ -275,14 +274,13 @@ func (f *fileSystem) Commit(commit *Commit) (err error) {
 
 	//--- update tree
 	sortHeaders(hh)
-	newTree, err := indexTree(hh)
-	assertNoErr(err)
+	newTree := tryVal(indexTree(hh))
 
 	//--- verify new root merkle and total-volume (Tree-Merkle, Tree-Volume headers)
 	newMerkle := newTree["/"].childrenMerkleRoot()
 	totalVolume := newTree["/"].totalVolume()
-	assertBool(bytes.Equal(newMerkle, b.TreeMerkleRoot()), "invalid commit-header Tree-Merkle-Root")
-	assertBool(totalVolume == b.GetInt(headerTreeVolume), "invalid commit-header Tree-Volume")
+	require(bytes.Equal(newMerkle, b.TreeMerkleRoot()), "invalid commit-header Tree-Merkle-Root")
+	require(totalVolume == b.GetInt(headerTreeVolume), "invalid commit-header Tree-Volume")
 
 	rootPartSize := b.PartSize()
 	//if rootPartSize == 0 {
@@ -290,67 +288,63 @@ func (f *fileSystem) Commit(commit *Commit) (err error) {
 	//}
 
 	//--- verify and put file content
-	err = f.db.Execute(func(tx db.Transaction) (err error) {
-		defer recoverErr(&err)
-
+	try(f.db.Execute(func(tx db.Transaction) (err error) {
+		defer catch(&err)
 		for _, h := range commit.Headers {
 			if hSize, hMerkle := h.FileSize(), h.FileMerkle(); hSize > 0 || len(hMerkle) != 0 {
-
 				partSize := h.PartSize()
 				if partSize == 0 {
 					partSize = rootPartSize
 				}
-				assertBool(partSize > 0, "empty commit-header Part-Size")
+				require(partSize > 0, "empty commit-header Part-Size")
 
 				r := io.LimitReader(commit.Body, hSize)
 				w := crypto.NewMerkleHash(partSize)
-				err = tx.Put(h.Path(), io.TeeReader(r, w))
-				assertNoErr(err)
-				assertBool(w.Written() == hSize, "invalid commit-content")
-				assertBool(bytes.Equal(w.Root(), h.FileMerkle()), "invalid commit-header Merkle")
+				try(tx.Put(h.Path(), io.TeeReader(r, w)))
+				require(w.Written() == hSize, "invalid commit-content")
+				require(bytes.Equal(w.Root(), h.FileMerkle()), "invalid commit-header Merkle")
 				delete(delFiles, h.Path())
 
 				//-------- v0
 				//cont := make([]byte, int(hSize))
 				//n, err := io.ReadFull(commit.Body, cont)
-				//assertNoErr(err)
-				//assertBool(int64(n) == hSize, "invalid commit-content")
+				//try(err)
+				//require(int64(n) == hSize, "invalid commit-content")
 				//
 				//merkle, _, _ := crypto.ReadMerkleRoot(bytes.NewBuffer(cont), hSize, partSize)
-				////assertBool(hSize == sz, "invalid commit-header Size")
-				//assertBool(bytes.Equal(h.FileMerkle(), merkle), "invalid commit-header Merkle")
+				////require(hSize == sz, "invalid commit-header Size")
+				//require(bytes.Equal(h.FileMerkle(), merkle), "invalid commit-header Merkle")
 				//
 				//err = tx.Put(h.Path(), bytes.NewBuffer(cont))
-				//assertNoErr(err)
+				//try(err)
 				//delete(delFiles, h.Path())
 
 				//-----------
 				// TODO: r := crypto.NewMerkleReader(commit.Body, hSize, h.PartSize())
 				// tx.Put(key, r) // put reader
-				// assertBool(bytes.Equal(h.Merkle(), r.MerkleRoot()))
-				// assertBool(r.ReadSize() == size, "invalid commit-header Size")
+				// require(bytes.Equal(h.Merkle(), r.MerkleRoot()))
+				// require(r.ReadSize() == size, "invalid commit-header Size")
 
 				// todo: put content by hash (put if not exists, delete on error)
 				//key:=fmt.Sprintf("X%x", merkle[:16])
 				//exst, err:= f.db.Exists(key)
-				//assertNoErr(err)
+				//try(err)
 				//if !exst {
 				//	err = f.db.Put(key, bytes.NewBuffer(cont))
-				//	assertNoErr(err)
+				//	try(err)
 				//}
 			}
 		}
 
 		//--- delete old files (???) -----
 		for path := range delFiles {
-			err = tx.Delete(path)
-			assertNoErr(err)
+			try(tx.Delete(path))
 		}
 		//--- save to Storage
-		return db.PutJSON(tx, dbKeyHeaders, hh)
-	})
+		try(db.PutJSON(tx, dbKeyHeaders, hh))
+		return
+	}))
 
-	assertNoErr(err)
 	f.nodes = newTree
 	return
 }

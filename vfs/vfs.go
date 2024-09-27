@@ -13,8 +13,8 @@ type VFS interface {
 	// FileHeader returns Header of file or directory
 	FileHeader(path string) (Header, error)
 
-	// FileMerkleProof returns hash and merkle-proof for file or dir-header
-	FileMerkleProof(path string) (hash, proof []byte, err error)
+	// FileMerkleWitness returns hash and merkle-witness for file or dir-header
+	FileMerkleWitness(path string) (hash, witness []byte, err error)
 
 	// FileParts returns hashes of file-parts
 	FileParts(path string) (hashes [][]byte, err error)
@@ -38,12 +38,12 @@ const (
 	DefaultProtocol     = "0.1"
 	DefaultFilePartSize = 1 << 20 // (1 MiB) – default file part size
 
-	MaxPathLength        = 255
-	MaxPathNameLength    = 50
+	MaxPathNameLength    = 255
 	MaxPathLevels        = 6
-	MaxPathDirFilesCount = 1024
+	MaxPathDirFilesCount = 4096
 
-	pathNameChars = ".-_~@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+	//MaxPathLength = MaxPathNameLength * MaxPathLevels
+	//pathNameChars = ".-_~@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
 var (
@@ -60,12 +60,11 @@ func IsValidPath(path string) bool {
 		return true
 	}
 	n := len(path)
-	if n == 0 || path[0] != '/' || n > MaxPathLength {
+	if n == 0 || path[0] != '/' {
 		return false
 	}
-	path = path[1:] // trim prefix '/'
-	path = strings.TrimSuffix(path, "/")
-	for i, name := range strings.Split(path, "/") { // todo: optimize
+	//path = path[1:] // trim prefix '/'
+	for i, name := range splitPath(path) {
 		if i >= MaxPathLevels || !isValidPathName(name) {
 			return false
 		}
@@ -73,17 +72,43 @@ func IsValidPath(path string) bool {
 	return true
 }
 
-func isValidPathName(name string) bool {
-	return name != "" && // len>0
-		name[0] != '.' && // not started from dot
-		len(name) <= MaxPathNameLength && //
-		containsOnly(name, pathNameChars) //
+func isValidPathName(part string) bool {
+	return part != "" &&
+		part != "." &&
+		len(part) <= MaxPathNameLength &&
+		!strings.HasPrefix(part, "..") &&
+		!strings.ContainsAny(part, "/\x00") &&
+		strings.TrimSpace(part) != ""
+}
+
+func splitPath(path string) (parts []string) {
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/") // for directory
+	var part strings.Builder
+	esc := false
+	for _, r := range path {
+		switch {
+		case esc:
+			part.WriteRune(r)
+			esc = false
+		case r == '\\':
+			esc = true
+		case r == '/':
+			parts = append(parts, part.String())
+			part.Reset()
+		default:
+			part.WriteRune(r)
+		}
+	}
+	if part.Len() > 0 {
+		parts = append(parts, part.String())
+	}
+	return
 }
 
 func pathLess(a, b string) bool {
-	// TODO: optimize
-	A := strings.Split(a, "/")
-	B := strings.Split(b, "/")
+	A := splitPath(a)
+	B := splitPath(b)
 	nB := len(B)
 	for i, Ai := range A {
 		if nB < i+1 {

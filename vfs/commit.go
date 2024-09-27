@@ -43,10 +43,9 @@ func (c *Commit) Trace() {
 }
 
 func MakeCommit(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (commit *Commit, err error) {
-	defer recoverErr(&err)
+	defer catch(&err)
 
-	root, err := vfs.FileHeader("/")
-	assertNoErr(err)
+	root := tryVal(vfs.FileHeader("/"))
 	ver := root.Ver() + 1       // new ver
 	partSize := root.PartSize() //
 
@@ -62,14 +61,13 @@ func MakeCommit(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (commit
 		if !IsValidPath(path) {
 			return
 		}
-		var err error
 		var dfsPath = path[1:] // trim prefix '/'
 		var isDir = strings.HasSuffix(path, "/")
 		h, err := vfs.FileHeader(path)
 		if err == ErrNotFound {
 			err = nil
 		}
-		assertNoErr(err)
+		try(err)
 		exists := h != nil
 		if h == nil {
 			h = Header{{headerPath, []byte(path)}}
@@ -78,8 +76,7 @@ func MakeCommit(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (commit
 		var fileMerkle []byte
 		var fileSize int64
 		if !isDir {
-			fileSize, fileMerkle, _, err = fsMerkleRoot(src, dfsPath, partSize)
-			assertNoErr(err)
+			fileSize, fileMerkle, _ = fsMerkleRoot(src, dfsPath, partSize)
 		}
 		if path == "/" || !exists || !isDir && !bytes.Equal(h.GetBytes(headerFileMerkle), fileMerkle) { // not exists or changed
 			h.SetInt(headerVer, ver) // set new version
@@ -98,10 +95,9 @@ func MakeCommit(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (commit
 				dfsPath = "."
 			}
 			dfsPath = strings.TrimSuffix(dfsPath, "/")
-			dd, err := fs.ReadDir(src, dfsPath)
-			assertNoErr(err)
+			dd := tryVal(fs.ReadDir(src, dfsPath))
 			if len(dd) > MaxPathDirFilesCount {
-				assertNoErr(ErrTooManyFiles)
+				try(ErrTooManyFiles)
 			}
 			sort.Slice(dd, func(i, j int) bool { // sort
 				return pathLess(dd[i].Name(), dd[j].Name())
@@ -139,7 +135,7 @@ func MakeCommit(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (commit
 		if err == ErrNotFound {
 			err = nil
 		}
-		assertNoErr(err)
+		try(err)
 		for _, h := range ff {
 			vfsWalk(h)
 		}
@@ -149,8 +145,7 @@ func MakeCommit(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (commit
 	//-- calc new commit merkle
 	sortHeaders(commit.Headers)
 	sortHeaders(hh)
-	newTree, err := indexTree(hh)
-	assertNoErr(err)
+	newTree := tryVal(indexTree(hh))
 	ndRoot := newTree["/"]
 
 	//--- set merkle + sign
@@ -165,15 +160,10 @@ func MakeCommit(vfs VFS, prv crypto.PrivateKey, src fs.FS, ts time.Time) (commit
 	return
 }
 
-func fsMerkleRoot(dfs fs.FS, path string, partSize int64) (size int64, merkle []byte, hashes [][]byte, err error) {
-	f, err := dfs.Open(path)
-	if err != nil {
-		return
-	}
+func fsMerkleRoot(dfs fs.FS, path string, partSize int64) (size int64, merkle []byte, hashes [][]byte) {
+	f := tryVal(dfs.Open(path))
 	defer f.Close()
-
 	w := crypto.NewMerkleHash(partSize)
-	_, err = io.Copy(w, f)
-	size, merkle, hashes = w.Written(), w.Root(), w.Leaves()
-	return
+	tryVal(io.Copy(w, f))
+	return w.Written(), w.Root(), w.Leaves()
 }

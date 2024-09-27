@@ -12,25 +12,63 @@ import (
 
 var testMode = len(os.Args) > 1 && strings.HasPrefix(os.Args[1], "-test.")
 
-func assertNoErr(err error) {
+func tryVal[T any](v T, err error) T {
+	try(err)
+	return v
+}
+
+func tryVal2[T1, T2 any](v1 T1, v2 T2, err error) (T1, T2) {
+	try(err)
+	return v1, v2
+}
+
+func tryVal3[T1, T2, T3 any](v1 T1, v2 T2, v3 T3, err error) (T1, T2, T3) {
+	try(err)
+	return v1, v2, v3
+}
+
+func excludeErr(err, errConst error) error {
+	if err == errConst {
+		return nil
+	}
+	return err
+}
+
+func try(err error) {
 	if err != nil {
 		log.Panic(err)
+		//_, file, line, _ := runtime.Caller(1)
+		//log.Panic(fmt.Errorf("%w\n\t%s:%d", err, file, line))
 	}
 }
 
-func assertBool(f bool, err string) {
+func require(f bool, err string) {
 	if !f {
-		assertNoErr(errors.New(err))
+		try(errors.New(err))
 	}
 }
 
-func recoverErr(err *error) {
+func catch(err *error) {
 	//if testMode {
 	//	return
 	//}
 	if r := recover(); r != nil {
-		*err = fmt.Errorf("%v", r)
+		*err = joinErrors(*err, toError(r))
 	}
+}
+
+func toError(err any) error {
+	if e, ok := err.(error); ok {
+		return e
+	}
+	return fmt.Errorf("%v", err)
+}
+
+func joinErrors(a, b error) error {
+	if a == nil {
+		return b
+	}
+	return errors.Join(a, b)
 }
 
 func containsOnly(s, chars string) bool {
@@ -52,13 +90,20 @@ func bContainOnly(s, chars []byte) bool {
 	return true
 }
 
-func toIndentJSON(v interface{}) string {
-	b, err := json.MarshalIndent(v, "", "  ")
-	assertNoErr(err)
-	return string(b)
+func toJSON(v any) string {
+	return string(tryVal(json.Marshal(v)))
 }
 
-func trace(title string, v interface{}) {
+func decodeJSON(data string) (v any) {
+	try(json.Unmarshal([]byte(data), &v))
+	return
+}
+
+func toIndentJSON(v any) string {
+	return string(tryVal(json.MarshalIndent(v, "", "  ")))
+}
+
+func trace(title string, v any) {
 	if !testMode {
 		return
 	}
