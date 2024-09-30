@@ -276,11 +276,11 @@ func (f *fileSystem) Commit(commit *Commit) (err error) {
 	sortHeaders(hh)
 	newTree := tryVal(indexTree(hh))
 
-	//--- verify new root merkle and total-volume (Tree-Merkle, Tree-Volume headers)
+	//--- verify new root merkle and total-volume (Merkle-Root and Volume headers)
 	newMerkle := newTree["/"].childrenMerkleRoot()
 	totalVolume := newTree["/"].totalVolume()
-	require(bytes.Equal(newMerkle, b.TreeMerkleRoot()), "invalid commit-header Tree-Merkle-Root")
-	require(totalVolume == b.GetInt(headerTreeVolume), "invalid commit-header Tree-Volume")
+	require(totalVolume == b.GetInt(headerTreeVolume), "invalid commit-header Volume")
+	require(bytes.Equal(newMerkle, b.TreeMerkleRoot()), "invalid commit-header Merkle-Root")
 
 	rootPartSize := b.PartSize()
 	//if rootPartSize == 0 {
