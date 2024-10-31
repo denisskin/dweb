@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"github.com/denisskin/dweb/crypto"
-	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
@@ -58,7 +57,7 @@ const testHeadersJSON = `[{
 func TestValidateHeader(t *testing.T) {
 	for _, h := range testHeaders {
 		err := ValidateHeader(h)
-		assert.NoError(t, err)
+		assert(t, err == nil)
 	}
 }
 
@@ -69,27 +68,21 @@ func BenchmarkHeader_Hash(b *testing.B) {
 }
 
 func TestHeader_String(t *testing.T) {
-	assert.Equal(t, `{`+
-		`"Ver":"1",`+
-		`"Title":"b64,SGVsbG8sIOS4lueVjA",`+
-		`"Description":"Test header",`+
-		`"Path":"/",`+
-		`"Created":"2022-01-01T01:02:03Z",`+
-		`"Updated":"2022-01-01T01:02:03Z",`+
-		`"Part-Size":"1024",`+
-		`"Public-Key":"Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",`+
-		`"Signature":"b64,HbG7v7CRU9En1Z4hp8jRN6py83aZMAbVJEVar8+CdFBPqTNgOkXG19MwyYHp4c4EmK4ya60cGsxXMwM4dHZEBQ"`+
-		`}`,
-		testHeaders[0].String(),
-	)
+	assert(t, equalJSON(toJSON(testHeaders[0]), `{
+		"Ver":         "1",
+		"Title":       "b64,SGVsbG8sIOS4lueVjA",
+		"Description": "Test header",
+		"Path":        "/",
+		"Created":     "2022-01-01T01:02:03Z",
+		"Updated":     "2022-01-01T01:02:03Z",
+		"Part-Size":   "1024",
+		"Public-Key":  "Ed25519,pms+pTAx/wOs+rx9Gy4wbdMWR/iz6MkEUBGlPF121GU=",
+		"Signature":   "b64,HbG7v7CRU9En1Z4hp8jRN6py83aZMAbVJEVar8+CdFBPqTNgOkXG19MwyYHp4c4EmK4ya60cGsxXMwM4dHZEBQ"
+	}`))
 }
 
 func TestHeader_MarshalJSON(t *testing.T) {
-
-	data, err := json.Marshal(testHeaders)
-
-	assert.NoError(t, err)
-	assert.JSONEq(t, testHeadersJSON, string(data))
+	assert(t, equalJSON(toJSON(testHeaders), testHeadersJSON))
 }
 
 func TestHeader_UnmarshalJSON(t *testing.T) {
@@ -97,8 +90,8 @@ func TestHeader_UnmarshalJSON(t *testing.T) {
 	var hh []Header
 	err := json.Unmarshal([]byte(testHeadersJSON), &hh)
 
-	assert.NoError(t, err)
-	assert.Equal(t, testHeaders, hh)
+	assert(t, err == nil)
+	assert(t, toJSON(testHeaders) == toJSON(hh))
 }
 
 func TestHeader_Hash(t *testing.T) {
@@ -106,9 +99,9 @@ func TestHeader_Hash(t *testing.T) {
 	h0 := testHeaders[0]
 	hash := hex.EncodeToString(h0[:len(h0)-1].Hash())
 
-	assert.Equal(t, "6ff712987e55d5efbb6005e05752e8748d046bc1ab6d41994b79a9c044472c0c", hash)
+	assert(t, "6ff712987e55d5efbb6005e05752e8748d046bc1ab6d41994b79a9c044472c0c" == hash)
 }
 
 func TestHeader_Verify(t *testing.T) {
-	assert.True(t, testHeaders[0].Verify())
+	assert(t, testHeaders[0].Verify())
 }

@@ -1,47 +1,47 @@
 package vfs
 
-import (
-	"github.com/stretchr/testify/assert"
-	"testing"
-)
+import "testing"
 
 func Test_dirname(t *testing.T) {
-	assert.Equal(t, "", dirname("/"))
-	assert.Equal(t, "/", dirname("/a.txt"))
-	assert.Equal(t, "/", dirname("/aa/"))
-	assert.Equal(t, "/aa/", dirname("/aa/bb"))
-	assert.Equal(t, "/aa/bb/", dirname("/aa/bb/cc.txt"))
+	assert(t, "" == dirname("/"))
+	assert(t, "/" == dirname("/a.txt"))
+	assert(t, "/" == dirname("/aa/"))
+	assert(t, "/aa/" == dirname("/aa/bb"))
+	assert(t, "/aa/bb/" == dirname("/aa/bb/cc.txt"))
+}
+
+func Test_splitPath(t *testing.T) {
+	assertEq(t, splitPath("/Hello/世界/Abc01.txt"), []any{"Hello", "世界", "Abc01.txt"})
 }
 
 func Test_IsValidPath(t *testing.T) {
-	assert.True(t, IsValidPath("/"))
-	assert.True(t, IsValidPath("/"))
-	assert.True(t, IsValidPath("/aaa/123_456-7890/Abc01.txt"))
-	assert.True(t, IsValidPath("/~/@/-/a../_/Abc01.txt"))
-	assert.True(t, IsValidPath("/aaa/111..-0/Abc01.txt"))
-	assert.True(t, IsValidPath("/1/2/3/4/5/Abc01.txt"))
-	assert.True(t, IsValidPath("/aaa/123456789-123456789-123456789-123456789-123456789-/Abc01.txt"))
-	assert.True(t, IsValidPath(""+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/1234")) // path-length == 255
+	assert(t, IsValidPath("/"))
+	assert(t, IsValidPath("/aaa/123_456-7890/Abc01.txt"))
+	assert(t, IsValidPath("/Hello, 世界/Abc01.txt"))
+	assert(t, IsValidPath("/Hello, 世界/Abc..01.txt"))
+	assert(t, IsValidPath("/~/@/-/a../_/Abc01.txt"))
+	assert(t, IsValidPath("/aaa/111..-0/Abc01.txt"))
+	assert(t, IsValidPath("/1/2/3/4/5/Abc01.txt"))
+	assert(t, IsValidPath("/aaa/123456789-123456789-123456789-123456789-123456789-/Abc01.txt"))
+	assert(t, IsValidPath("/aaa/.111-0/Abc01.txt"))
+	assert(t, IsValidPath("/"+
+		"-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789"+
+		"-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789"+
+		"-123456789-123456789-123456789-123456789-123456789"+
+		"1.txt",
+	)) // path-length == 255
+	assert(t, IsValidPath("/aaa/.Abc01.txt"))
 
-	assert.False(t, IsValidPath("/aaa//Abc01.txt"))
-	assert.False(t, IsValidPath("/aaa/.111-0/Abc01.txt"))
-	assert.False(t, IsValidPath("/aaa/./Abc01.txt"))
-	assert.False(t, IsValidPath("/aaa/../Abc01.txt"))
-	assert.False(t, IsValidPath("/aaa/.Abc01.txt"))
-	assert.False(t, IsValidPath("/aaa/.../Abc01.txt"))
-	assert.False(t, IsValidPath("/1/2/3/4/5/A/bc01.txt"))
-	assert.False(t, IsValidPath("/aaa/123456789-123456789-123456789-123456789-123456789-1/Abc01.txt"))
-	assert.False(t, IsValidPath(""+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/123456789-123456789-123456789-123456789-123456789"+
-		"/12345")) // path-length == 256
+	assert(t, !IsValidPath("/aaa/..Abc01.txt"))
+	assert(t, !IsValidPath("/aaa/  /Abc01.txt"))
+	assert(t, !IsValidPath("/aaa//Abc01.txt"))
+	assert(t, !IsValidPath("/aaa/./Abc01.txt"))
+	assert(t, !IsValidPath("/aaa/../Abc01.txt"))
+	assert(t, !IsValidPath("/aaa/.../Abc01.txt"))
+	assert(t, !IsValidPath("/1/2/3/4/5/A/bc01.txt"))
+	assert(t, !IsValidPath("/"+
+		"123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-"+
+		"123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-123456789-"+
+		"123456789-123456789-123456789-123456789-123456789-12.txt",
+	)) // path-length == 256
 }
