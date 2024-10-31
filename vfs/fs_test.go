@@ -6,204 +6,215 @@ import (
 	"github.com/denisskin/dweb/db"
 	"github.com/denisskin/dweb/db/memdb"
 	"github.com/denisskin/dweb/vfs/test_data"
-	"github.com/stretchr/testify/assert"
 	"io"
 	"testing"
 	"time"
 )
 
-func TestMakeBatch(t *testing.T) {
+func assert(t *testing.T, ok bool) {
+	if !ok {
+		//t.Fatal()
+		panic(0)
+	}
+}
+
+func assertEq(t *testing.T, a, b any) {
+	assert(t, equalJSON(toJSON(a), toJSON(b)))
+}
+
+func equalJSON(a, b string) bool {
+	return a == b || toJSON(decodeJSON(a)) == toJSON(decodeJSON(b))
+}
+
+func TestMakeCommit(t *testing.T) {
 
 	s := newMemVFS()
 
-	//---------- batch-1 (init data)
-	batch1 := makeTestBatch(s, "batch1")
-	assert.True(t, len(batch1.Headers) > 1)
-	assert.Equal(t, int64(1), batch1.Ver())
-	trace("====== batch1", batch1)
+	//---------- commit-1 (init data)
+	commit1 := makeTestCommit(s, "commit1")
+	assert(t, len(commit1.Headers) > 1)
+	assert(t, int64(1) == commit1.Ver())
+	trace("====== commit1", commit1)
 
-	// apply batch
-	err := s.PutBatch(batch1)
-	assert.NoError(t, err)
+	// apply commit
+	err := s.Commit(commit1)
+	assert(t, err == nil)
 	trace("====== db-1", s)
 
-	// reapply the same batch - FAIL
-	err = s.PutBatch(batch1)
-	assert.Error(t, err)
+	// reapply the same commit - FAIL
+	err = s.Commit(commit1)
+	assert(t, err != nil)
 
-	//------ repeat batch-1 (the same files; changed root-header only)
-	batch1a := makeTestBatch(s, "batch1")
-	assert.Equal(t, 1, len(batch1a.Headers))
-	assert.Equal(t, int64(2), batch1a.Ver())
+	//------ repeat commit-1 (the same files; changed root-header only)
+	commit1A := makeTestCommit(s, "commit1")
+	assert(t, 1 == len(commit1A.Headers))
+	assert(t, int64(2) == commit1A.Ver())
 
-	err = s.PutBatch(batch1a)
-	assert.NoError(t, err)
+	err = s.Commit(commit1A)
+	assert(t, err == nil)
 	trace("====== db-1a", s)
 
-	//------- batch-2
-	batch2 := makeTestBatch(s, "batch2")
-	trace("====== batch2", batch2)
-	assert.True(t, len(batch2.Headers) > 1)
-	assert.Equal(t, int64(3), batch2.Ver())
+	//------- commit-2
+	commit2 := makeTestCommit(s, "commit2")
+	trace("====== commit2", commit2)
+	assert(t, len(commit2.Headers) > 1)
+	assert(t, int64(3) == commit2.Ver())
 
-	err = s.PutBatch(batch2)
-	assert.NoError(t, err)
+	err = s.Commit(commit2)
+	assert(t, err == nil)
 	trace("====== db-2", s)
 
-	//------ make invalid batch
-	badBatch := makeTestBatch(s, "batch3")
-	badBatch.Headers[0].Set("Updated", "2020-01-03T00:00:01Z") // modify batch
-	trace("====== invalid batch-1", badBatch)
-	err = s.PutBatch(badBatch)
-	assert.Error(t, err)
+	//------ make invalid commit
+	invalidCommit := makeTestCommit(s, "commit3")
+	invalidCommit.Headers[0].Set("Updated", "2020-01-03T00:00:01Z") // modify commit data
+	trace("====== invalid commit-1", invalidCommit)
+	err = s.Commit(invalidCommit)
+	assert(t, err != nil)
 
-	//------ make invalid batch-2
-	badBatch = makeTestBatch(s, "batch3")
-	h := &badBatch.Headers[len(badBatch.Headers)-1]
-	h.SetInt("Size", h.FileSize()+1) // modify batch-line-header Size for readme.txt file
-	trace("====== invalid batch-2", badBatch)
-	err = s.PutBatch(badBatch)
-	assert.Error(t, err)
+	//------ make invalid commit-2
+	invalidCommit = makeTestCommit(s, "commit3")
+	h := &invalidCommit.Headers[len(invalidCommit.Headers)-1]
+	h.SetInt("Size", h.FileSize()+1) // modify commit-line-header Size for readme.txt file
+	trace("====== invalid commit-2", invalidCommit)
+	err = s.Commit(invalidCommit)
+	assert(t, err != nil)
 
-	//------ make invalid batch-3
-	badBatch = makeTestBatch(s, "batch3")
-	h = &badBatch.Headers[len(badBatch.Headers)-1]
-	h.SetBytes("Merkle", append(h.FileMerkle(), 0)) // modify batch: modify header Merkle for last line (readme.txt)
-	trace("====== invalid batch-3", badBatch)
-	err = s.PutBatch(badBatch)
-	assert.Error(t, err)
+	//------ make invalid commit-3
+	invalidCommit = makeTestCommit(s, "commit3")
+	h = &invalidCommit.Headers[len(invalidCommit.Headers)-1]
+	h.SetBytes("Merkle", append(h.FileMerkle(), 0)) // modify commit: modify header Merkle for last line (readme.txt)
+	trace("====== invalid commit-3", invalidCommit)
+	err = s.Commit(invalidCommit)
+	assert(t, err != nil)
 
-	//------ make invalid batch-4
-	badBatch = makeTestBatch(s, "batch3")
-	cont, _ := io.ReadAll(badBatch.Body)
+	//------ make invalid commit-4
+	invalidCommit = makeTestCommit(s, "commit3")
+	cont, _ := io.ReadAll(invalidCommit.Body)
 	cont[len(cont)-1]++
-	badBatch.Body = io.NopCloser(bytes.NewBuffer(cont)) // modify Content
-	trace("====== invalid batch-4", badBatch)
-	err = s.PutBatch(badBatch)
-	assert.Error(t, err)
+	invalidCommit.Body = io.NopCloser(bytes.NewBuffer(cont)) // modify Content
+	trace("====== invalid commit-4", invalidCommit)
+	err = s.Commit(invalidCommit)
+	assert(t, err != nil)
 
-	//------ make invalid batch-5
-	badBatch = makeTestBatch(s, "batch3")
-	badBatch.Headers = badBatch.Headers[:len(badBatch.Headers)-1] // modify batch: delete last header
-	trace("====== invalid batch-5", badBatch)
-	err = s.PutBatch(badBatch)
-	assert.Error(t, err)
+	//------ make invalid commit-5
+	invalidCommit = makeTestCommit(s, "commit3")
+	invalidCommit.Headers = invalidCommit.Headers[:len(invalidCommit.Headers)-1] // modify commit: delete last header
+	trace("====== invalid commit-5", invalidCommit)
+	err = s.Commit(invalidCommit)
+	assert(t, err != nil)
 
-	//------- batch-3
-	batch3 := makeTestBatch(s, "batch3")
-	trace("====== batch3", batch3)
-	assert.True(t, len(batch3.Headers) > 1)
-	assert.Equal(t, int64(4), batch3.Ver())
+	//------- commit-3
+	commit3 := makeTestCommit(s, "commit3")
+	trace("====== commit3", commit3)
+	assert(t, len(commit3.Headers) > 1)
+	assert(t, int64(4) == commit3.Ver())
 
-	err = s.PutBatch(batch3)
-	assert.NoError(t, err)
+	err = s.Commit(commit3)
+	assert(t, err == nil)
 	trace("====== db-3", s)
 
 	//------- check result
 	B, err := s.FileHeader("/B/")
-	assert.NoError(t, err)
-	assert.NotNil(t, B)
-	assert.True(t, B.Deleted())
+	assert(t, err == nil)
+	assert(t, B != nil)
+	assert(t, B.Deleted())
 
 	B2, err := s.FileHeader("/B/2/")
-	assert.Error(t, err)
-	assert.Nil(t, B2)
+	assert(t, err != nil)
+	assert(t, B2 == nil)
 }
 
-func TestFileSystem_PutBatch_conflictBatches(t *testing.T) {
+func TestFileSystem_Commit_conflictCommits(t *testing.T) {
 
-	//----- make two conflict batches. A.Ver == B.Ver && A.Updated == B.Updated
-	batchA := makeTestBatch(newMemVFS(), "batch1")
-	batchB := makeTestBatch(newMemVFS(), "batch1")
-	batchB.Headers[0].Add("X", "x")
-	batchB.Headers[0].Sign(testPrv)
-	if bytes.Compare(batchA.Hash(), batchB.Hash()) > 0 {
-		batchA, batchB = batchB, batchA
+	//----- make two conflict commits. A.Ver == B.Ver && A.Updated == B.Updated
+	commitA := makeTestCommit(newMemVFS(), "commit1")
+	commitB := makeTestCommit(newMemVFS(), "commit1")
+	commitB.Headers[0].Add("X", "x")
+	commitB.Headers[0].Sign(testPrv)
+	if bytes.Compare(commitA.Hash(), commitB.Hash()) > 0 {
+		commitA, commitB = commitB, commitA
 	}
-	assert.True(t, batchA.Ver() == batchB.Ver())
-	assert.True(t, batchA.Updated().Equal(batchB.Updated()))
-	assert.True(t, bytes.Compare(batchA.Hash(), batchB.Hash()) < 0)
+	assert(t, commitA.Ver() == commitB.Ver())
+	assert(t, commitA.Updated().Equal(commitB.Updated()))
+	assert(t, bytes.Compare(commitA.Hash(), commitB.Hash()) < 0)
 
-	//----- apply batch
+	//----- apply commit
 	s := newMemVFS()
-	err := s.PutBatch(batchA)
-	assert.NoError(t, err)
+	err := s.Commit(commitA)
+	assert(t, err == nil)
 
-	//----- apply alternative batch with great version. OK
-	err = s.PutBatch(batchB)
-	assert.NoError(t, err)
+	//----- apply alternative commit with great version. OK
+	err = s.Commit(commitB)
+	assert(t, err == nil)
 
-	//----- apply alternative batch with low version. FAIL
-	err = s.PutBatch(batchA)
-	assert.Error(t, err)
+	//----- apply alternative commit with low version. FAIL
+	err = s.Commit(commitA)
+	assert(t, err != nil)
 }
 
-func TestFileSystem_GetBatch(t *testing.T) {
+func TestFileSystem_GetCommit(t *testing.T) {
 
-	s3 := applyBatch(newMemVFS(), "batch1", "batch2", "batch3")
+	s3 := applyCommit(newMemVFS(), "commit1", "commit2", "commit3")
 
 	//--------
-	s1 := applyBatch(newMemVFS(), "batch1")
+	s1 := applyCommit(newMemVFS(), "commit1")
 	r1, err := s1.FileHeader("/")
-	assert.NoError(t, err)
+	assert(t, err == nil)
 
-	// request batch from current version
-	batch1, err := s3.GetBatch(r1.Ver())
-	assert.NoError(t, err)
-	assert.True(t, len(batch1.Headers) > 1)
-	assert.Equal(t, int64(3), batch1.Root().Ver())
+	// request commit from current version
+	commit1, err := s3.GetCommit(r1.Ver())
+	assert(t, err == nil)
+	assert(t, len(commit1.Headers) > 1)
+	assert(t, int64(3) == commit1.Root().Ver())
 
-	err = s1.PutBatch(batch1)
-	assert.NoError(t, err)
-	assert.Equal(t, fsHeaders(s3), fsHeaders(s1))
+	err = s1.Commit(commit1)
+	assert(t, err == nil)
+	assert(t, toJSON(fsHeaders(s3)) == toJSON(fsHeaders(s1)))
 
 	//--------
-	s2 := applyBatch(newMemVFS(), "batch1")
+	s2 := applyCommit(newMemVFS(), "commit1")
 
-	// request full batch (from 0version)
-	batch2, err := s3.GetBatch(0)
-	assert.NoError(t, err)
-	assert.True(t, len(batch2.Headers) > 1)
-	assert.Equal(t, int64(3), batch2.Root().Ver())
+	// request full commit (from 0version)
+	commit2, err := s3.GetCommit(0)
+	assert(t, err == nil)
+	assert(t, len(commit2.Headers) > 1)
+	assert(t, int64(3) == commit2.Root().Ver())
 
-	err = s2.PutBatch(batch2)
-	assert.NoError(t, err)
-	assert.Equal(t, fsHeaders(s3), fsHeaders(s2))
+	err = s2.Commit(commit2)
+	assert(t, err == nil)
+	assert(t, toJSON(fsHeaders(s3)) == toJSON(fsHeaders(s2)))
+
 }
 
-func TestFileSystem_FileMerkleProof(t *testing.T) {
-	s := applyBatch(newMemVFS(), "batch1")
+func TestFileSystem_FileMerkleWitness(t *testing.T) {
+	s := applyCommit(newMemVFS(), "commit1")
 	hh := fsHeaders(s)
 	merkleRoot := hh[0].TreeMerkleRoot()
 
 	for _, h := range hh[1:] {
-		// make merkle proof for each file
-		fileHash, fileProof, err := s.FileMerkleProof(h.Path())
-		assert.NoError(t, err)
-		assert.Equal(t, fileHash, h.Hash())
-		assert.True(t, len(fileProof) > 0 && len(fileProof)%33 == 0)
-		assert.Equal(t, 32, len(fileHash))
+		// make merkle witness for each file
+		fileHash, fileWitness, err := s.FileMerkleWitness(h.Path())
+		assert(t, err == nil)
+		assert(t, bytes.Equal(fileHash, h.Hash()))
+		assert(t, len(fileWitness) > 0 && len(fileWitness)%33 == 0)
+		assert(t, 32 == len(fileHash))
 
-		// verify merkle-proof
-		ok := crypto.VerifyMerkleProof(fileHash, merkleRoot, fileProof)
-		assert.True(t, ok)
+		// verify merkle-witness
+		ok := crypto.VerifyMerkleWitness(fileHash, merkleRoot, fileWitness)
+		assert(t, ok)
 
 		if h.IsFile() {
 			parts, err := s.FileParts(h.Path())
-			assert.NoError(t, err)
-			assert.Equal(t, h.FileMerkle(), crypto.MerkleRoot(parts...))
+			assert(t, err == nil)
+			assert(t, bytes.Equal(h.FileMerkle(), crypto.MerkleRoot(parts...)))
 		}
 	}
 }
 
-func makeTestBatch(vfs VFS, batchName string) *Batch {
-	h0, err := vfs.FileHeader("/")
-	assertNoErr(err)
-	tBatch := h0.Updated().Add(time.Second)
-
-	batch, err := MakeBatch(vfs, testPrv, test_data.FS(batchName), tBatch)
-	assertNoErr(err)
-	return batch
+func makeTestCommit(vfs VFS, commitName string) *Commit {
+	hRoot := tryVal(vfs.FileHeader("/"))
+	tCommit := hRoot.Updated().Add(time.Second)
+	return tryVal(MakeCommit(vfs, testPrv, test_data.FS(commitName), tCommit))
 }
 
 func fsHeaders(f VFS) (hh []Header) {
@@ -214,21 +225,19 @@ func newMemVFS() VFS {
 	var t0, _ = time.Parse("2006-01-02 15:04:05", "2022-01-01 00:00:00")
 
 	d := memdb.New()
-	assertNoErr(d.Execute(func(tx db.Transaction) error { // init DB
+	try(d.Execute(func(tx db.Transaction) error { // init DB
 		h0 := NewRootHeader(testPub)
 		h0.SetTime("Created", t0)
 		h0.SetTime("Updated", t0)
 		h0.SetInt(headerPartSize, 1024)
 		return db.PutJSON(tx, dbKeyHeaders, []Header{h0})
 	}))
-	f, err := OpenVFS(testPub, d)
-	assertNoErr(err)
-	return f
+	return tryVal(OpenVFS(testPub, d))
 }
 
-func applyBatch(f VFS, batchName ...string) VFS {
-	for _, name := range batchName {
-		assertNoErr(f.PutBatch(makeTestBatch(f, name)))
+func applyCommit(f VFS, commitName ...string) VFS {
+	for _, name := range commitName {
+		try(f.Commit(makeTestCommit(f, name)))
 	}
 	return f
 }
